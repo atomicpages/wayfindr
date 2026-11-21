@@ -1,0 +1,43 @@
+# Every push to main and every pull request: the Go checks, a
+# snapshot build of every release target, and the installers run against it.
+# This is the release dry run; release.yml repeats it for a v* tag.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  scripts:
+    name: Lint workflows and installer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go
+      - run: shellcheck docs/public/install.sh
+      # actionlint also runs shellcheck on every `run:` block.
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+  snapshot:
+    uses: ./.github/workflows/goreleaser.yml
+    with:
+      snapshot: true
+
+  install:
+    needs: snapshot
+    uses: ./.github/workflows/install-test.yml
+    with:
+      artifact: dist

@@ -1,0 +1,32 @@
+{
+  "retention": "720h0m0s",
+  "calls": [
+    {
+      "started_at": "2026-11-08T09:02:00Z",
+      "client": "cursor",
+      "token_name": "nightly-triage",
+      "connector": "slack",
+      "tool": "post_message",
+      "duration_ms": 30000,
+      "result": "failed",
+      "kind": "timeout"
+    },
+    {
+      "started_at": "2026-11-08T09:01:00Z",
+      "connector": "github",
+      "tool": "get_file",
+      "result": "rejected",
+      "kind": "invalid_arguments",
+      "case": "schema_mismatch"
+    },
+    {
+      "started_at": "2026-11-08T09:00:00Z",
+      "client": "claude-code",
+      "token_name": "default",
+      "connector": "linear",
+      "tool": "create_issue",
+      "duration_ms": 412,
+      "result": "ok"
+    }
+  ]
+}

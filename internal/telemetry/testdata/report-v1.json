@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "install_id": "6f1c2b7e-3d4a-4c1e-9b2f-8a7d5e0c1f23",
+  "window_hours": 25,
+  "version": "v0.4.0",
+  "commit": "2e3a922",
+  "go": "go1.26.1",
+  "os": "darwin",
+  "arch": "arm64",
+  "store": "sqlite",
+  "embedding": true,
+  "embedding_provider": "openai",
+  "embedding_model": "text-embedding-3-small",
+  "connectors": {
+    "transport": { "stdio": 1, "streamable": 2, "sse": 1 },
+    "auth": { "api": 1, "none": 2, "oauth": 1 }
+  },
+  "profiles": 2,
+  "searches": 3,
+  "calls": { "ok": 2, "tool_error": 1, "rejected": 1, "failed": 1, "input_required": 0 },
+  "clients": { "claude_code": 2, "cursor": 1, "other": 2 },
+  "pow": { "date": "2026-11-18", "nonce": "00000000002b841d" }
+}

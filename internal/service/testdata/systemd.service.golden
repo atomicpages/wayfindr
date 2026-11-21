@@ -1,0 +1,12 @@
+# Written by `wayfindr service install`, which replaces it;
+# `wayfindr service uninstall` removes it.
+[Unit]
+Description=Wayfindr MCP gateway
+
+[Service]
+ExecStart=/opt/wayfindr/bin/wayfindr start --foreground --log-file <root>/home/.local/share/wayfindr/wayfindr.log
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

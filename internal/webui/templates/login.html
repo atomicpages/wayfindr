@@ -1,0 +1,24 @@
+{{define "login"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Wayfindr</title>
+<link rel="icon" href="/ui/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/ui/static/app.css">
+<script src="/ui/static/login.js" defer></script>
+</head>
+<body class="login-page">
+<main class="login card">
+  <h1>Wayfindr console</h1>
+  {{if .Failed}}
+  <p>This sign-in link has expired or was already used. Each link works once, for one minute.</p>
+  {{end}}
+  <p>Run <code>wayfindr ui</code> in a terminal. It opens the console here, signed in.</p>
+  <form id="login" method="post" action="/ui/login">
+    <input type="hidden" name="code" value="">
+  </form>
+</main>
+</body>
+</html>
+{{end}}

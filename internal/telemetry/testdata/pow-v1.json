@@ -1,0 +1,34 @@
+{
+  "comment": "Proof-of-work test vectors for usage report schema 1 (ADR 0020). sha256 is the hex SHA-256 of \"wayfindr-report-v1|\" + install_id + \"|\" + date + \"|\" + nonce; valid means it starts with at least difficulty zero bits. The collector checks the same vectors.",
+  "difficulty": 24,
+  "vectors": [
+    {
+      "install_id": "6f1c2b7e-3d4a-4c1e-9b2f-8a7d5e0c1f23",
+      "date": "2026-11-18",
+      "nonce": "00000000002b841d",
+      "sha256": "0000003048aa7213912a2a0139020adb08ba7028cf4e45ca14079fa4cb90fad4",
+      "valid": true
+    },
+    {
+      "install_id": "0b9e7c1a-52d4-4f0e-a3c6-1d2e3f405162",
+      "date": "2026-11-19",
+      "nonce": "000000000155626b",
+      "sha256": "000000d908e22e44fddf8d2c1fdca7535f69b62abd3d740cb759f01b8cf6ca5a",
+      "valid": true
+    },
+    {
+      "install_id": "6f1c2b7e-3d4a-4c1e-9b2f-8a7d5e0c1f23",
+      "date": "2026-11-19",
+      "nonce": "00000000002b841d",
+      "sha256": "aae114d02cf8b63c9fe31845479e08862e035c1675fe0ac7ffde96d4740371d0",
+      "valid": false
+    },
+    {
+      "install_id": "6f1c2b7e-3d4a-4c1e-9b2f-8a7d5e0c1f23",
+      "date": "2026-11-18",
+      "nonce": "0000000000000000",
+      "sha256": "71089bff8c64956f5170411a43a8c980bf1f7964b40f6b0bbcfca54262ba8768",
+      "valid": false
+    }
+  ]
+}

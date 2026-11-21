@@ -1,0 +1,393 @@
+[
+  {
+    "name": "whoami",
+    "description": "Identify the authenticated user in Sentry. Use this tool when you need to know who the current user is.",
+    "annotations": { "title": "Who am I", "readOnlyHint": true },
+    "inputSchema": { "type": "object", "properties": {} }
+  },
+  {
+    "name": "find_organizations",
+    "description": "Find organizations that the user has access to in Sentry. Use this tool when you need to view all organizations in Sentry or find an organization's slug.",
+    "annotations": { "title": "Find Organizations", "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query to filter results by name or slug."
+        }
+      }
+    }
+  },
+  {
+    "name": "find_teams",
+    "description": "Find teams in an organization in Sentry. Use this tool when you need to view teams in a Sentry organization or find a team's slug.",
+    "annotations": { "title": "Find Teams", "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "query": {
+          "type": "string",
+          "description": "Search query to filter results by name or slug."
+        }
+      },
+      "required": ["organizationSlug"]
+    }
+  },
+  {
+    "name": "find_projects",
+    "description": "Find projects in Sentry. Use this tool when you need to view projects in a Sentry organization or find a project's slug.",
+    "annotations": { "title": "Find Projects", "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "query": {
+          "type": "string",
+          "description": "Search query to filter results by name or slug."
+        }
+      },
+      "required": ["organizationSlug"]
+    }
+  },
+  {
+    "name": "find_releases",
+    "description": "Find releases in Sentry. Use this tool when you need to find the most recent releases or information about a specific release version.",
+    "annotations": { "title": "Find Releases", "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "projectSlug": {
+          "type": "string",
+          "description": "The project's slug."
+        },
+        "query": {
+          "type": "string",
+          "description": "Search for versions which contain the provided string."
+        }
+      },
+      "required": ["organizationSlug"]
+    }
+  },
+  {
+    "name": "find_tags",
+    "description": "Find tags in Sentry. Use this tool when you need to see which tags are available for filtering errors and events.",
+    "annotations": { "title": "Find Tags", "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        }
+      },
+      "required": ["organizationSlug"]
+    }
+  },
+  {
+    "name": "find_dsns",
+    "description": "List all Sentry DSNs for a specific project. Use this tool when you need to retrieve a DSN for configuring an SDK.",
+    "annotations": { "title": "Find DSNs", "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "projectSlug": {
+          "type": "string",
+          "description": "The project's slug."
+        }
+      },
+      "required": ["organizationSlug", "projectSlug"]
+    }
+  },
+  {
+    "name": "get_issue_details",
+    "description": "Get detailed information about a specific Sentry issue by ID, including the stacktrace of the latest event. Use this tool when you need to investigate an error or exception reported in Sentry.",
+    "annotations": { "title": "Get Issue Details", "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "issueId": {
+          "type": "string",
+          "description": "The Issue ID, e.g. PROJECT-1Z43"
+        },
+        "issueUrl": {
+          "type": "string",
+          "description": "The URL of the issue."
+        },
+        "eventId": {
+          "type": "string",
+          "description": "The ID of a specific event."
+        }
+      }
+    }
+  },
+  {
+    "name": "get_event_attachment",
+    "description": "Download attachments from a Sentry event, such as minidumps, screenshots, or log files.",
+    "annotations": { "title": "Get Event Attachment", "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "projectSlug": {
+          "type": "string",
+          "description": "The project's slug."
+        },
+        "eventId": { "type": "string", "description": "The ID of the event." },
+        "attachmentId": {
+          "type": "string",
+          "description": "The ID of the attachment to download."
+        }
+      },
+      "required": ["organizationSlug", "projectSlug", "eventId"]
+    }
+  },
+  {
+    "name": "update_issue",
+    "description": "Update an issue's status or assignment in Sentry. Use this tool to resolve, ignore, or unresolve an issue, or to assign it to a user or team.",
+    "annotations": { "title": "Update Issue", "readOnlyHint": false },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "issueId": {
+          "type": "string",
+          "description": "The Issue ID, e.g. PROJECT-1Z43"
+        },
+        "status": {
+          "type": "string",
+          "description": "The new status: resolved, resolvedInNextRelease, unresolved, or ignored."
+        },
+        "assignedTo": {
+          "type": "string",
+          "description": "The assignee as 'user:ID' or 'team:ID'."
+        }
+      },
+      "required": ["organizationSlug", "issueId"]
+    }
+  },
+  {
+    "name": "search_events",
+    "description": "Search for events in Sentry using natural language, and get counts and aggregations. Use this tool for error counts, performance metrics, and spans, e.g. 'how many errors today' or 'slowest API calls'.",
+    "annotations": { "title": "Search Events", "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "naturalLanguageQuery": {
+          "type": "string",
+          "description": "Natural language description of the events to search for."
+        },
+        "projectSlug": {
+          "type": "string",
+          "description": "Optional project to scope the search."
+        }
+      },
+      "required": ["organizationSlug", "naturalLanguageQuery"]
+    }
+  },
+  {
+    "name": "search_issues",
+    "description": "Search for grouped issues in Sentry using natural language. Returns a list of issues with basic information, e.g. 'unresolved errors from the last day' or 'critical bugs assigned to me'.",
+    "annotations": { "title": "Search Issues", "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "naturalLanguageQuery": {
+          "type": "string",
+          "description": "Natural language description of the issues to search for."
+        },
+        "projectSlugOrId": {
+          "type": "string",
+          "description": "Optional project to scope the search."
+        }
+      },
+      "required": ["organizationSlug", "naturalLanguageQuery"]
+    }
+  },
+  {
+    "name": "create_team",
+    "description": "Create a new team in Sentry.",
+    "annotations": { "title": "Create Team", "readOnlyHint": false },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the team to create."
+        }
+      },
+      "required": ["organizationSlug", "name"]
+    }
+  },
+  {
+    "name": "create_project",
+    "description": "Create a new project in Sentry, giving you access to a new SDK client key (DSN).",
+    "annotations": { "title": "Create Project", "readOnlyHint": false },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "teamSlug": { "type": "string", "description": "The team's slug." },
+        "name": {
+          "type": "string",
+          "description": "The name of the project to create."
+        },
+        "platform": {
+          "type": "string",
+          "description": "The platform for the project, e.g. python or javascript."
+        }
+      },
+      "required": ["organizationSlug", "teamSlug", "name"]
+    }
+  },
+  {
+    "name": "update_project",
+    "description": "Update project settings in Sentry, such as its name, slug, platform, or team assignment.",
+    "annotations": { "title": "Update Project", "readOnlyHint": false },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "projectSlug": {
+          "type": "string",
+          "description": "The project's slug."
+        },
+        "name": {
+          "type": "string",
+          "description": "The new name for the project."
+        },
+        "platform": {
+          "type": "string",
+          "description": "The platform for the project."
+        }
+      },
+      "required": ["organizationSlug", "projectSlug"]
+    }
+  },
+  {
+    "name": "create_dsn",
+    "description": "Create an additional DSN for an existing project.",
+    "annotations": { "title": "Create DSN", "readOnlyHint": false },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "projectSlug": {
+          "type": "string",
+          "description": "The project's slug."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the DSN to create."
+        }
+      },
+      "required": ["organizationSlug", "projectSlug", "name"]
+    }
+  },
+  {
+    "name": "analyze_issue_with_seer",
+    "description": "Use Seer to analyze a production error and get a root cause analysis with a specific code fix recommendation.",
+    "annotations": {
+      "title": "Analyze Issue with Seer",
+      "readOnlyHint": false
+    },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "organizationSlug": {
+          "type": "string",
+          "description": "The organization's slug."
+        },
+        "issueId": {
+          "type": "string",
+          "description": "The Issue ID, e.g. PROJECT-1Z43"
+        },
+        "instruction": {
+          "type": "string",
+          "description": "Optional custom instruction for the analysis."
+        }
+      },
+      "required": ["organizationSlug", "issueId"]
+    }
+  },
+  {
+    "name": "search_docs",
+    "description": "Search Sentry documentation for SDK setup, instrumentation, and configuration guidance.",
+    "annotations": { "title": "Search Documentation", "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The search query in natural language."
+        },
+        "guide": {
+          "type": "string",
+          "description": "Optional guide filter, e.g. 'javascript/nextjs'."
+        }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "get_doc",
+    "description": "Fetch the full markdown content of a Sentry documentation page.",
+    "annotations": { "title": "Get Document", "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The documentation path, from search_docs results."
+        }
+      },
+      "required": ["path"]
+    }
+  }
+]

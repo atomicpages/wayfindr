@@ -1,0 +1,304 @@
+[
+  {
+    "kind": "exact",
+    "query": "create_issue",
+    "top5": ["github.create_issue", "linear.create_issue"]
+  },
+  {
+    "kind": "exact",
+    "query": "list_pull_requests",
+    "first": "github.list_pull_requests"
+  },
+  { "kind": "exact", "query": "git_status", "first": "git.git_status" },
+  {
+    "kind": "exact",
+    "query": "slack_post_message",
+    "first": "slack.slack_post_message"
+  },
+  {
+    "kind": "exact",
+    "query": "browser_take_screenshot",
+    "first": "playwright.browser_take_screenshot"
+  },
+  {
+    "kind": "exact",
+    "query": "notion-search",
+    "first": "notion.notion-search"
+  },
+  {
+    "kind": "exact",
+    "query": "get_issue_details",
+    "first": "sentry.get_issue_details"
+  },
+  {
+    "kind": "exact",
+    "query": "explain_query",
+    "first": "postgres.explain_query"
+  },
+  { "kind": "exact", "query": "read_graph", "first": "memory.read_graph" },
+  {
+    "kind": "exact",
+    "query": "createPaymentLink",
+    "first": "stripe.create_payment_link"
+  },
+  {
+    "kind": "exact",
+    "query": "linear.update_issue",
+    "first": "linear.update_issue"
+  },
+  { "kind": "exact", "query": "convert_time", "first": "time.convert_time" },
+  {
+    "kind": "exact",
+    "query": "list issues",
+    "top5": ["github.list_issues", "linear.list_issues"]
+  },
+
+  {
+    "kind": "partial",
+    "query": "pull request diff",
+    "first": "github.get_pull_request_diff"
+  },
+  {
+    "kind": "partial",
+    "query": "merge pull request",
+    "first": "github.merge_pull_request"
+  },
+  {
+    "kind": "partial",
+    "query": "workflow runs",
+    "first": "github.list_workflow_runs"
+  },
+  {
+    "kind": "partial",
+    "query": "directory tree",
+    "first": "filesystem.directory_tree"
+  },
+  {
+    "kind": "partial",
+    "query": "channel history",
+    "first": "slack.slack_get_channel_history"
+  },
+  {
+    "kind": "partial",
+    "query": "thread replies",
+    "first": "slack.slack_get_thread_replies",
+    "top5": ["slack.slack_reply_to_thread"]
+  },
+  {
+    "kind": "partial",
+    "query": "subscription",
+    "top5": [
+      "stripe.list_subscriptions",
+      "stripe.cancel_subscription",
+      "stripe.update_subscription"
+    ]
+  },
+  {
+    "kind": "partial",
+    "query": "invoice",
+    "top5": [
+      "stripe.list_invoices",
+      "stripe.create_invoice",
+      "stripe.finalize_invoice",
+      "stripe.create_invoice_item"
+    ]
+  },
+  {
+    "kind": "partial",
+    "query": "knowledge graph entities",
+    "top5": ["memory.create_entities", "memory.delete_entities"]
+  },
+  {
+    "kind": "partial",
+    "query": "dsn",
+    "top5": ["sentry.create_dsn", "sentry.find_dsns"]
+  },
+  {
+    "kind": "partial",
+    "query": "release",
+    "top5": [
+      "github.list_releases",
+      "github.get_latest_release",
+      "sentry.find_releases"
+    ]
+  },
+  {
+    "kind": "partial",
+    "query": "update project",
+    "top5": ["linear.update_project", "sentry.update_project"]
+  },
+
+  {
+    "kind": "natural",
+    "query": "send a message to a slack channel",
+    "top5": ["slack.slack_post_message"]
+  },
+  {
+    "kind": "natural",
+    "query": "read the contents of a file",
+    "top5": ["filesystem.read_text_file", "github.get_file_contents"]
+  },
+  {
+    "kind": "natural",
+    "query": "take a screenshot of the page",
+    "first": "playwright.browser_take_screenshot"
+  },
+  {
+    "kind": "natural",
+    "query": "what time is it in Tokyo",
+    "top5": ["time.get_current_time", "time.convert_time"]
+  },
+  {
+    "kind": "natural",
+    "query": "show the commit history",
+    "top5": ["git.git_log"]
+  },
+  {
+    "kind": "natural",
+    "query": "find slow database queries",
+    "top5": ["postgres.get_top_queries"]
+  },
+  {
+    "kind": "natural",
+    "query": "resolve an error in sentry",
+    "top5": ["sentry.update_issue", "sentry.get_issue_details"]
+  },
+  { "kind": "natural", "query": "who am i", "first": "sentry.whoami" },
+  {
+    "kind": "natural",
+    "query": "refund a payment",
+    "first": "stripe.create_refund"
+  },
+  {
+    "kind": "natural",
+    "query": "open a new pull request",
+    "first": "github.create_pull_request"
+  },
+  {
+    "kind": "natural",
+    "query": "list my assigned linear tickets",
+    "top5": ["linear.list_my_issues"]
+  },
+  {
+    "kind": "natural",
+    "query": "query a notion database",
+    "first": "notion.notion-query-data-sources"
+  },
+  {
+    "kind": "natural",
+    "query": "rename a file",
+    "first": "filesystem.move_file"
+  },
+  {
+    "kind": "natural",
+    "query": "stage files for commit",
+    "top5": ["git.git_add"]
+  },
+
+  {
+    "kind": "typo",
+    "query": "creat_isue",
+    "top5": ["github.create_issue", "linear.create_issue"]
+  },
+  {
+    "kind": "typo",
+    "query": "merg pull reqest",
+    "first": "github.merge_pull_request"
+  },
+  {
+    "kind": "typo",
+    "query": "screnshot",
+    "first": "playwright.browser_take_screenshot"
+  },
+  {
+    "kind": "typo",
+    "query": "post mesage",
+    "first": "slack.slack_post_message"
+  },
+  {
+    "kind": "typo",
+    "query": "subscripton",
+    "top5": [
+      "stripe.list_subscriptions",
+      "stripe.cancel_subscription",
+      "stripe.update_subscription"
+    ]
+  },
+  {
+    "kind": "typo",
+    "query": "directry tree",
+    "first": "filesystem.directory_tree"
+  },
+  { "kind": "typo", "query": "knowlege graph", "top5": ["memory.read_graph"] },
+  {
+    "kind": "typo",
+    "query": "databse health",
+    "first": "postgres.analyze_db_health"
+  },
+  {
+    "kind": "typo",
+    "query": "list brnches",
+    "top5": ["github.list_branches", "git.git_branch"]
+  },
+  {
+    "kind": "typo",
+    "query": "get_isue_coments",
+    "first": "github.get_issue_comments"
+  },
+
+  {
+    "kind": "synonym",
+    "query": "fetch customers",
+    "first": "stripe.list_customers"
+  },
+  {
+    "kind": "synonym",
+    "query": "retrieve a linear issue",
+    "first": "linear.get_issue"
+  },
+  {
+    "kind": "synonym",
+    "query": "get the balance",
+    "first": "stripe.retrieve_balance"
+  },
+  { "kind": "synonym", "query": "unstage changes", "first": "git.git_reset" },
+  {
+    "kind": "synonym",
+    "query": "switch branches",
+    "first": "git.git_checkout"
+  },
+  {
+    "kind": "synonym",
+    "query": "download workflow logs",
+    "first": "github.get_job_logs"
+  },
+  {
+    "kind": "synonym",
+    "query": "remove a file from a github repository",
+    "first": "github.delete_file"
+  },
+  {
+    "kind": "synonym",
+    "query": "remove entities from the knowledge graph",
+    "first": "memory.delete_entities"
+  },
+  {
+    "kind": "synonym",
+    "query": "stop a subscription",
+    "first": "stripe.cancel_subscription"
+  },
+  { "kind": "synonym", "query": "save my changes", "top5": ["git.git_commit"] },
+
+  {
+    "kind": "filtered",
+    "query": "create issue",
+    "connectors": ["linear"],
+    "first": "linear.create_issue"
+  },
+  {
+    "kind": "filtered",
+    "query": "search",
+    "connectors": ["notion"],
+    "first": "notion.notion-search"
+  }
+]

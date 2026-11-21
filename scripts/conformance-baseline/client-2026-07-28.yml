@@ -1,0 +1,58 @@
+# Expected failures for `make conformance-client` at protocol version
+# 2026-07-28 (scripts/conformance-client.sh), read by the suite's
+# --expected-failures flag.
+#
+# Format: a `client:` list of `<scenario>:<check-id>` entries (no space after
+# the colon), one per check that may fail or warn. Check IDs are the `id`
+# fields in bin/conformance-client/<version>/<scenario>-*/checks.json. The
+# suite fails the run on any failing or warning check not listed here and on
+# a listed check that now passes, so keep it exact. Never list a bare
+# `<scenario>`: it would hide a regression in the scenario's other checks.
+#
+# One file covers two runs: the --requirements run, which scores only the
+# scenarios the version requires, and one run per not-scored extension
+# scenario (extensions/), which checks those too. An entry for a scenario a
+# run did not include is ignored by that run.
+#
+# Each entry is a gap in Wayfindr's upstream (OAuth) client, recorded on
+# 2026-11-17 for Phase 0 of the upstream OAuth work. docs/internal/compat.md,
+# "Client leg (upstream)", gives the counts. Phase 1b (wayfindr-9fep) sends
+# application_type in the DCR request, which removed the 23 SEP-837 entries.
+client:
+  # Scored.
+  # The PRM at the root (/.well-known/oauth-protected-resource) names the
+  # origin as its resource, which Wayfindr rejects because it is not the
+  # connector URL; discovery falls back to the MCP server's origin, which has
+  # no authorization server metadata, so there is no client to register.
+  - auth/metadata-var2:authorization-server-metadata
+  - auth/metadata-var2:client-registration
+  - auth/metadata-var2:authorization-request
+  - auth/metadata-var2:token-request
+  - auth/metadata-var2:resource-parameter-in-authorization
+  - auth/metadata-var2:resource-parameter-in-token
+  # SEP-2468: the RFC 9207 iss check treats "<issuer>/" as the issuer and
+  # redeems the code; a trailing-slash variant must be refused.
+  - auth/iss-normalized:sep-2468-client-no-normalization
+  # The 403 insufficient_scope on server/discover is lost: the transport
+  # falls back to initialize (400 at this version) and then SSE, so the
+  # connector goes unreachable, not needs_auth (step_up), and there is no
+  # second authorization.
+  - auth/scope-step-up:scope-step-up-escalation
+  - auth/scope-step-up:sep-2350-scope-union-on-reauth
+  # Warning: an OAuth connector with no credential goes to needs_auth without
+  # a request, so Wayfindr never sees the 401 challenge's scope (mcp:basic)
+  # and asks for the PRM's scopes_supported instead.
+  - auth/scope-step-up:scope-step-up-initial
+  # Warning: CIMD needs client_metadata_url in the config (Wayfindr hosts no
+  # metadata document); the harness sets none, so Wayfindr uses DCR.
+  - auth/basic-cimd:cimd-client-id-used
+  # call_tool checks arguments against the inputSchema and refuses the
+  # scenario's verbose: null (the schema says boolean), so the call never
+  # reaches the server to show that the null header is left out.
+  - http-custom-headers:sep-2243-client-omit-null
+
+  # Not scored (extensions; run one by one).
+  # No Enterprise-Managed Authorization: the context's IdP token has no
+  # config key, so the harness exits before starting a daemon.
+  - auth/enterprise-managed-authorization:complete-flow-token-exchange
+  - auth/enterprise-managed-authorization:complete-flow-jwt-bearer

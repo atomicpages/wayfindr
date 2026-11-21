@@ -1,0 +1,79 @@
+# GoReleaser config for tagged releases (.github/workflows/goreleaser.yml) and
+# local snapshots (make snapshot). See docs/internal/releasing.md.
+#
+# The version comes from GORELEASER_CURRENT_TAG, which the workflow and the
+# Makefile set from the newest v* tag, so the gate/* milestone tags never
+# become a version or a changelog boundary.
+version: 2
+
+project_name: wayfindr
+
+builds:
+  - main: ./cmd/wayfindr
+    binary: wayfindr
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    # Keep in step with LDFLAGS in the Makefile. The version keeps its leading
+    # v (v0.1.0), as git describe does for make build.
+    ldflags:
+      - -s -w
+      - -X github.com/atomicpages/wayfindr/internal/cli.version=v{{ .Version }}
+      - -X github.com/atomicpages/wayfindr/internal/cli.commit={{ .ShortCommit }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  # Unversioned names, so the installers can use releases/latest/download/<name>.
+  - name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "^style"
+      - "^chore"
+
+release:
+  # Created as a draft; release.yml publishes it once provenance is attested
+  # and the installers have installed these exact archives.
+  draft: true
+  prerelease: auto
+  footer: |
+    ## Install
+
+    macOS and Linux:
+
+    ```sh
+    curl -fsSL https://atomicpages.github.io/wayfindr/install.sh | sh -s -- {{ .Tag }}
+    ```
+
+    Windows (PowerShell):
+
+    ```powershell
+    $env:WAYFINDR_VERSION = "{{ .Tag }}"; irm https://atomicpages.github.io/wayfindr/install.ps1 | iex
+    ```
+
+    The installers check each archive against `checksums.txt`. To verify that an
+    archive was built from this repository by this release's workflow:
+
+    ```sh
+    gh attestation verify wayfindr-<os>-<arch>.tar.gz -R atomicpages/wayfindr   # .zip on Windows
+    ```

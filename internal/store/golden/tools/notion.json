@@ -1,0 +1,277 @@
+[
+  {
+    "name": "notion-search",
+    "title": "Search Notion and connected sources",
+    "description": "Perform a search over your entire Notion workspace and connected sources (Slack, Google Drive, GitHub, Jira, and more). Use it to find pages, databases, and their content by keyword or natural-language question. Search results include page titles, URLs, and short highlights.",
+    "annotations": { "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Semantic search query over your entire Notion workspace and connected sources."
+        },
+        "query_type": {
+          "type": "string",
+          "description": "Use 'user' to search for workspace members instead of content."
+        },
+        "data_source_url": {
+          "type": "string",
+          "description": "Optionally, provide the URL of a data source to restrict the search to it."
+        },
+        "filters": {
+          "type": "object",
+          "description": "Optional filters such as created date range or creator."
+        }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "notion-fetch",
+    "title": "Fetch Notion entities",
+    "description": "Retrieves details about a Notion entity (page, database, or data source) by URL or ID. Returns the page content in Notion-flavored Markdown, along with its properties.",
+    "annotations": { "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The ID or URL of the Notion page, database, or data source to fetch."
+        }
+      },
+      "required": ["id"]
+    }
+  },
+  {
+    "name": "notion-create-pages",
+    "title": "Create pages in Notion",
+    "description": "Creates one or more Notion pages with the specified properties and content. Pages can be created under a parent page, a data source (database), or as private workspace pages.",
+    "annotations": { "readOnlyHint": false },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "pages": {
+          "type": "array",
+          "description": "The pages to create, each with properties and content in Notion-flavored Markdown."
+        },
+        "parent": {
+          "type": "object",
+          "description": "The parent under which the new pages will be created: a page ID or data source ID."
+        }
+      },
+      "required": ["pages"]
+    }
+  },
+  {
+    "name": "notion-update-page",
+    "title": "Update Notion page",
+    "description": "Update a Notion page's properties or content. Supports replacing all content, inserting content after a selection, or updating properties.",
+    "annotations": { "readOnlyHint": false },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "page_id": {
+          "type": "string",
+          "description": "The ID of the page to update."
+        },
+        "command": {
+          "type": "string",
+          "description": "One of update_properties, replace_content, replace_content_range, insert_content_after."
+        },
+        "properties": {
+          "type": "object",
+          "description": "Page properties to set."
+        },
+        "new_str": {
+          "type": "string",
+          "description": "The new content in Notion-flavored Markdown."
+        }
+      },
+      "required": ["page_id", "command"]
+    }
+  },
+  {
+    "name": "notion-move-pages",
+    "title": "Move Notion pages",
+    "description": "Move one or more Notion pages or databases to a new parent.",
+    "annotations": { "readOnlyHint": false },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "page_or_database_ids": {
+          "type": "array",
+          "description": "IDs of the pages or databases to move."
+        },
+        "new_parent": {
+          "type": "object",
+          "description": "The new parent page, database, or workspace."
+        }
+      },
+      "required": ["page_or_database_ids", "new_parent"]
+    }
+  },
+  {
+    "name": "notion-duplicate-page",
+    "title": "Duplicate Notion page",
+    "description": "Duplicate a Notion page. The page must be within the current workspace. Duplication completes asynchronously.",
+    "annotations": { "readOnlyHint": false },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "page_id": {
+          "type": "string",
+          "description": "The ID of the page to duplicate."
+        }
+      },
+      "required": ["page_id"]
+    }
+  },
+  {
+    "name": "notion-create-database",
+    "title": "Create Notion database",
+    "description": "Creates a new Notion database with the specified properties schema, as a child page of a parent or in the workspace.",
+    "annotations": { "readOnlyHint": false },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The title of the new database."
+        },
+        "properties": {
+          "type": "object",
+          "description": "The property schema of the database: column names and types."
+        },
+        "parent": {
+          "type": "object",
+          "description": "The parent page under which to create the database."
+        }
+      },
+      "required": ["properties"]
+    }
+  },
+  {
+    "name": "notion-update-database",
+    "title": "Update Notion database",
+    "description": "Update a Notion database's title, description, or property schema: add, rename, or remove columns.",
+    "annotations": { "readOnlyHint": false },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "database_id": {
+          "type": "string",
+          "description": "The ID of the database to update."
+        },
+        "title": { "type": "string", "description": "The new title." },
+        "properties": {
+          "type": "object",
+          "description": "Property schema changes."
+        }
+      },
+      "required": ["database_id"]
+    }
+  },
+  {
+    "name": "notion-query-data-sources",
+    "title": "Query Notion data sources",
+    "description": "Query a Notion data source (database) with filters and sorts to retrieve the rows that match, like a SQL SELECT over a database.",
+    "annotations": { "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "data_source_url": {
+          "type": "string",
+          "description": "The URL of the data source to query."
+        },
+        "filter": {
+          "type": "object",
+          "description": "Filter conditions on database properties."
+        },
+        "sorts": {
+          "type": "array",
+          "description": "Sort order for the results."
+        }
+      },
+      "required": ["data_source_url"]
+    }
+  },
+  {
+    "name": "notion-create-comment",
+    "title": "Add comment to page",
+    "description": "Add a comment to a page or to a specific block of content in a Notion page.",
+    "annotations": { "readOnlyHint": false },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "page_id": {
+          "type": "string",
+          "description": "The ID of the page to comment on."
+        },
+        "rich_text": {
+          "type": "array",
+          "description": "The comment text as rich text."
+        },
+        "discussion_id": {
+          "type": "string",
+          "description": "Reply in an existing discussion thread."
+        }
+      },
+      "required": ["page_id", "rich_text"]
+    }
+  },
+  {
+    "name": "notion-get-comments",
+    "title": "Get comments",
+    "description": "Get all comments and discussion threads on a Notion page.",
+    "annotations": { "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "page_id": {
+          "type": "string",
+          "description": "The ID of the page to get comments from."
+        }
+      },
+      "required": ["page_id"]
+    }
+  },
+  {
+    "name": "notion-get-users",
+    "title": "List workspace users",
+    "description": "Retrieves a list of users in the current Notion workspace, with names and emails.",
+    "annotations": { "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Filter users by name or email."
+        },
+        "user_id": {
+          "type": "string",
+          "description": "Return a single user by ID, or 'self' for the current user."
+        }
+      }
+    }
+  },
+  {
+    "name": "notion-get-teams",
+    "title": "List teamspaces",
+    "description": "Retrieves a list of teams (teamspaces) in the current Notion workspace.",
+    "annotations": { "readOnlyHint": true },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "description": "Filter teams by name." }
+      }
+    }
+  },
+  {
+    "name": "notion-get-self",
+    "title": "Get bot user",
+    "description": "Retrieve your token's bot user and the workspace it belongs to.",
+    "annotations": { "readOnlyHint": true },
+    "inputSchema": { "type": "object", "properties": {} }
+  }
+]

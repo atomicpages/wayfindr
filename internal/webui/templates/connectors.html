@@ -1,0 +1,60 @@
+{{define "content"}}{{with .Body}}
+<div class="page-head">
+  <div>
+    <h1>Connectors</h1>
+    <p>The MCP servers this daemon connects to. This page refreshes every 10 seconds.</p>
+  </div>
+  <div class="actions"><a class="btn btn-primary" href="/ui/add">{{icon "plus"}}Add connector</a></div>
+</div>
+{{if .ConfigError}}
+<div class="alert err">{{icon "alert"}}<div><b>The config file has an error</b><p>The daemon is still running its last good config. {{.ConfigError}}</p></div></div>
+{{end}}
+{{/* hx-disinherit keeps the poll's select, target and swap off the links
+     inside, which would otherwise swap this div for nothing on a click. */}}
+<div id="connectors" class="stack" hx-get="/ui/" hx-trigger="every 10s" hx-select="#connectors" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">
+  <div class="stats">
+    <div class="card stat"><div class="label">Ready{{icon "plug"}}</div><div class="value">{{.Ready}}<small> / {{.Total}}</small></div><div class="hint">connectors serving tools</div></div>
+    <div class="card stat{{if .Need}} attn{{end}}"><div class="label">Need you{{icon "alert"}}</div><div class="value">{{.Need}}</div><div class="hint">{{if .Need}}{{.NeedNames}}{{else}}nothing to fix{{end}}</div></div>
+    <div class="card stat"><div class="label">Tools in search{{icon "search"}}</div><div class="value">{{.Exposed}}</div><div class="hint">{{if .Hidden}}{{.Hidden}} hidden by tools lists{{else}}none hidden{{end}}</div></div>
+  </div>
+  {{if .Need}}
+  <div class="alert warn">{{icon "alert"}}<div><b>{{.Need}} {{if eq .Need 1}}connector needs{{else}}connectors need{{end}} you</b><p>Calls to {{.NeedNames}} fail until {{if eq .Need 1}}it is{{else}}they are{{end}} fixed. Each row says what to do.</p></div></div>
+  {{end}}
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Connector</th><th>Status</th><th class="r">Tools</th><th class="hide-sm">Last sync</th><th class="hide-sm">Token expires</th><th class="r"><span class="sr">Actions</span></th></tr></thead>
+        <tbody>
+        {{range .Rows}}
+          <tr>
+            <td>
+              <div class="conn-cell">{{template "logo" .Logo}}<div>
+                <a class="name" href="/ui/connectors/{{.Name}}">{{.Name}}</a>
+                {{with .Advice}}<div class="advice">{{code .Summary}} {{code .Action}}</div>{{end}}
+                {{range .Warnings}}<div class="advice warn-text">{{code .Summary}} {{code .Action}}</div>{{end}}
+                {{if .SyncError}}<div class="advice err-text">The last sync failed: {{.SyncError}}</div>{{end}}
+              </div></div>
+            </td>
+            <td>{{template "badge" .Badge}}</td>
+            <td class="r num">{{if .Ready}}{{.Tools}}{{if .Hidden}}<span class="muted"> +{{.Hidden}} hidden</span>{{end}}{{else}}<span class="muted">—</span>{{end}}</td>
+            <td class="hide-sm nowrap">{{or .LastSync "—"}}</td>
+            <td class="hide-sm nowrap">{{or .Expires "—"}}</td>
+            <td class="r">{{if .SignIn}}
+              <form method="post" action="/ui/connectors/{{.Name}}/sign-in" target="_blank" hx-boost="false">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <button class="btn btn-sm {{if .Ready}}btn-outline{{else}}btn-primary{{end}}" type="submit">{{icon "ext"}}{{.SignInLabel}}</button>
+              </form>{{end}}
+            </td>
+          </tr>
+        {{else}}
+          <tr><td colspan="6" class="empty">No connectors are configured yet. <a href="/ui/add">Add your first connector</a>.</td></tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{with .Orphaned}}
+  <p class="note">Stored credentials of connectors no longer in the config: {{range $i, $n := .}}{{if $i}}, {{end}}<code>{{$n}}</code>{{end}}. Remove each with <code>wayfindr auth logout &lt;name&gt;</code>.</p>
+  {{end}}
+</div>
+{{end}}{{end}}

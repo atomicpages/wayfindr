@@ -1,0 +1,30 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - exhaustive
+    - gocritic
+    - gosec
+    - misspell
+    - noctx
+    - revive
+    - unconvert
+    - unparam
+  settings:
+    # A switch on an enum-like type (a named type with a closed const set,
+    # such as a package's Kind and Case) must list every value. A default
+    # clause does not count as covering the rest (CODING_STANDARDS: Errors);
+    # a switch meant to be partial says so with //exhaustive:ignore and a
+    # reason.
+    exhaustive:
+      check:
+        - switch
+      default-signifies-exhaustive: false
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

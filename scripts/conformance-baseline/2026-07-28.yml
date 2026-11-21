@@ -1,0 +1,80 @@
+# Expected failures for `make conformance` at protocol version 2026-07-28
+# (scripts/conformance.sh), read by the suite's --expected-failures flag.
+#
+# Format: a `server:` list of `<scenario>:<check-id>` entries (no space after
+# the colon), one per check that may fail or warn. Check IDs are the `id`
+# fields in bin/conformance/<version>/server-<scenario>-*/checks.json. The
+# suite fails the run on any failing or warning check not listed here, even
+# in a scenario that has listed checks, and on a listed check that now
+# passes, so keep it exact. The suite also accepts a bare `<scenario>` entry,
+# which excuses every check in the scenario; don't use it, since it would
+# hide a regression in that scenario's other checks (wire-schema-valid, the
+# tools/list checks).
+#
+# Nearly every entry calls a fixture of the suite's reference server (tools
+# named test_*, prompts, resources, completions, subscriptions). By design
+# Wayfindr exposes only search_tools and call_tool, and no prompts or
+# resources (ADR 0001), so these fail with "unknown tool" or, for prompts,
+# resources, and completions, which the gateway does not declare, "method not
+# found" (-32601, design §7.6). They say nothing about protocol conformance.
+# Scenarios that test the protocol itself are not listed and must pass.
+# docs/internal/compat.md, "Conformance results", gives each reason.
+server:
+  # Fixture tools, prompts, resources, and completions.
+  - completion-complete:completion-complete
+  - tools-call-simple-text:tools-call-simple-text
+  - tools-call-image:tools-call-image
+  - tools-call-audio:tools-call-audio
+  - tools-call-embedded-resource:tools-call-embedded-resource
+  - tools-call-mixed-content:tools-call-mixed-content
+  - tools-call-error:tools-call-error
+  - tools-call-with-progress:tools-call-with-progress
+  - json-schema-2020-12:json-schema-2020-12-tool-found
+  - resources-read-text:resources-read-text
+  - resources-read-binary:resources-read-binary
+  - resources-templates-read:resources-templates-read
+  - prompts-get-simple:prompts-get-simple
+  - prompts-get-with-args:prompts-get-with-args
+  - prompts-get-embedded-resource:prompts-get-embedded-resource
+  - prompts-get-with-image:prompts-get-with-image
+  # No tool carries x-mcp-header annotations, so all five are "not testable".
+  - http-custom-header-server-validation:sep-2243-server-no-xmcp-tool
+  - http-custom-header-server-validation:sep-2243-server-decode-base64
+  - http-custom-header-server-validation:sep-2243-server-validate-param-match
+  - http-custom-header-server-validation:sep-2243-server-reject-invalid-param-chars
+  - http-custom-header-server-validation:sep-2243-server-reject-param-mismatch
+  # The test_input_required_result_* fixtures.
+  - input-required-result-basic-elicitation:sep-2322-elicitation-incomplete
+  - input-required-result-basic-sampling:sep-2322-sampling-incomplete
+  - input-required-result-basic-list-roots:sep-2322-list-roots-incomplete
+  - input-required-result-request-state:sep-2322-request-state-incomplete
+  - input-required-result-multiple-input-requests:sep-2322-multiple-inputs-incomplete
+  - input-required-result-multi-round:sep-2322-multi-round-r1
+  - input-required-result-non-tool-request:sep-2322-non-tool-incomplete
+  - input-required-result-result-type:sep-2322-result-type-included
+  - input-required-result-tampered-state:sep-2322-reject-tampered-state
+  - input-required-result-capability-check:sep-2322-respect-client-capabilities
+  # Warnings: both call the test_input_required_result_elicitation fixture.
+  - input-required-result-missing-input-response:sep-2322-missing-response-rerequests
+  - input-required-result-ignore-extra-params:sep-2322-ignore-unexpected-params
+  # Four of its checks need fixtures (test_missing_capability,
+  # test_streaming_elicitation, test_logging_tool); its 24 protocol checks
+  # are not listed and must pass.
+  - server-stateless:sep-2575-server-rejects-undeclared-capability
+  - server-stateless:sep-2575-missing-capability-http-400
+  - server-stateless:sep-2575-http-server-no-independent-requests-on-stream
+  - server-stateless:sep-2575-server-no-log-without-loglevel
+  # The gateway declares only tools and answers every prompts/*, resources/*,
+  # and completion/* request with -32601 (design §7.6). These scenarios
+  # assume a server with prompts and resources: prompts-list and
+  # resources-list want a list, caching wants caching hints on the prompt and
+  # resource lists, and sep-2164-resource-not-found wants -32602 with the URI
+  # in data from resources/read (warnings). caching's tools/list, ttl, and
+  # scope checks are not listed and must pass.
+  - prompts-list:prompts-list
+  - resources-list:resources-list
+  - caching:sep-2549-prompts-list-caching-hints
+  - caching:sep-2549-resources-list-caching-hints
+  - caching:sep-2549-resources-templates-list-caching-hints
+  - sep-2164-resource-not-found:sep-2164-error-code
+  - sep-2164-resource-not-found:sep-2164-data-uri

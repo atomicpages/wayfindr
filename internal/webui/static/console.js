@@ -1,0 +1,109 @@
+// Console behaviour. This loads in <head> without defer, so its listeners,
+// all on the document, exist before the body parses and keep working after
+// htmx swaps it. Every page also works without it.
+(function () {
+  // A connector logo that can't load (offline, say) hides, which shows the
+  // letter under it. error doesn't bubble, so listen in the capture phase.
+  document.addEventListener(
+    "error",
+    (e) => {
+      if (e.target instanceof HTMLImageElement && e.target.matches("img.brand-logo")) {
+        e.target.hidden = true;
+      }
+    },
+    true,
+  );
+
+  // A multi-select dropdown: a <details class="multi"> of checkboxes, which
+  // opens and posts with no script. This adds the filter, keeps the
+  // summary's chips in step with the boxes, and closes it on Escape or when
+  // focus or a click goes elsewhere.
+  function closeOthers(target) {
+    for (const d of document.querySelectorAll("details.multi[open]")) {
+      if (!d.contains(target)) {
+        d.open = false;
+      }
+    }
+  }
+
+  function filter(input) {
+    const menu = input.closest(".multi-menu");
+    const q = input.value.trim().toLowerCase();
+    let shown = 0;
+
+    for (const row of menu.querySelectorAll(".check")) {
+      row.hidden = q !== "" && !row.textContent.toLowerCase().includes(q);
+      shown += row.hidden ? 0 : 1;
+    }
+
+    menu.querySelector(".multi-none").hidden = shown > 0;
+  }
+
+  function renderChips(multi) {
+    const value = multi.querySelector(".multi-value");
+
+    for (const chip of value.querySelectorAll(".chip")) {
+      chip.remove();
+    }
+
+    const placeholder = value.querySelector(".multi-placeholder");
+
+    for (const box of multi.querySelectorAll("input[type=checkbox]:checked")) {
+      const chip = document.createElement("span");
+      chip.className = "badge secondary chip";
+      const logo = box.parentElement.querySelector(".mini");
+
+      if (logo) {
+        chip.append(logo.cloneNode(true));
+      }
+
+      chip.append(box.value);
+      value.insertBefore(chip, placeholder);
+    }
+  }
+
+  document.addEventListener("click", (e) => closeOthers(e.target));
+  document.addEventListener("focusin", (e) => closeOthers(e.target));
+
+  document.addEventListener("input", (e) => {
+    if (e.target.matches(".multi-filter")) {
+      filter(e.target);
+    }
+  });
+
+  document.addEventListener("change", (e) => {
+    const multi = e.target.closest("details.multi");
+
+    if (multi && e.target.type === "checkbox") {
+      renderChips(multi);
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    const multi = e.target.closest && e.target.closest("details.multi[open]");
+
+    if (!multi) {
+      return;
+    }
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      multi.open = false;
+      multi.querySelector("summary").focus();
+    } else if (e.key === "Enter" && e.target.matches(".multi-filter")) {
+      // Enter in the filter would submit the form.
+      e.preventDefault();
+    }
+  });
+
+  // toggle does not bubble, so listen in the capture phase.
+  document.addEventListener(
+    "toggle",
+    (e) => {
+      if (e.target.matches && e.target.matches("details.multi") && e.target.open) {
+        e.target.querySelector(".multi-filter").focus();
+      }
+    },
+    true,
+  );
+})();

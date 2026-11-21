@@ -1,0 +1,97 @@
+{{define "content"}}{{with .Body}}{{with .Row}}
+<div class="page-head">
+  <div class="title-row">
+    {{template "logo" .Logo}}
+    <h1>{{.Name}}</h1>
+    {{template "badge" .Badge}}
+  </div>
+  <div class="actions">
+    {{if .SignIn}}
+    <form method="post" action="/ui/connectors/{{.Name}}/sign-in" target="_blank" hx-boost="false">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <button class="btn btn-primary" type="submit">{{icon "ext"}}{{.SignInLabel}}</button>
+    </form>
+    {{end}}
+    {{if .SignOut}}
+    <form method="post" action="/ui/connectors/{{.Name}}/sign-out">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <button class="btn btn-destructive" type="submit">{{icon "logout"}}Sign out</button>
+    </form>
+    {{end}}
+  </div>
+</div>
+{{with .Advice}}<div class="alert {{if $.Body.Row.Ready}}warn{{else}}err{{end}}">{{icon "alert"}}<div><b>{{code
+      .Summary}}</b>{{with .Action}}<p>{{code .}}</p>{{end}}</div>
+</div>{{end}}
+{{range .Warnings}}<div class="alert warn">{{icon "alert"}}<div><b>{{code .Summary}}</b>{{with .Action}}<p>{{code .}}
+    </p>{{end}}</div>
+</div>{{end}}
+<div class="card">
+  <dl class="facts">
+    <div>
+      <dt>Tools in search</dt>
+      <dd>{{if .Ready}}{{.Tools}}{{if .Hidden}} <span class="muted">+{{.Hidden}} hidden</span>{{end}}{{else}}—{{end}}
+      </dd>
+    </div>
+    <div>
+      <dt>Last sync</dt>
+      <dd>{{or .LastSync "—"}}</dd>
+    </div>
+    <div>
+      <dt>Token expires</dt>
+      <dd>{{or .Expires "—"}}</dd>
+    </div>
+    <div>
+      <dt>Sign-in</dt>
+      <dd>{{if .SignOut}}OAuth{{else}}None stored{{end}}</dd>
+    </div>
+  </dl>
+</div>
+{{if .SyncError}}<div class="alert err">{{icon "alert"}}<div><b>The last sync failed</b>
+    <p>{{.SyncError}}</p>
+  </div>
+</div>{{end}}
+{{end}}
+<div class="card">
+  <div class="card-head">
+    <div>
+      <h2>Tools</h2>
+      <p>Every tool the server offers now. Open one to see its definition as the server sends it. To change
+        which ones clients can find, edit this connector's <code>tools</code> list in your config file.</p>
+    </div>
+  </div>
+  {{if .ToolsError}}
+  <p class="card-body muted">{{.ToolsError}}</p>
+  {{else}}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Tool</th>
+          <th>Class</th>
+          <th>In search</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range $i, $t := .Tools}}
+        <tr class="{{if not .Exposed}}dim {{end}}{{if .Spec}}has-why{{end}}">
+          <td class="name">{{if .Spec}}<details class="why"><summary aria-controls="spec-{{$i}}">{{.Name}}{{icon "chev"}}<span
+                  class="sr">Show the definition</span></summary></details>{{else}}{{.Name}}{{end}}</td>
+          <td><span class="badge cls-{{.Class}}">{{.Class}}</span></td>
+          <td>{{if .Exposed}}<span class="badge ok"><span class="dot"></span>Exposed</span>{{else}}<span
+              class="muted">Hidden by the tools list</span>{{end}}</td>
+          </tr>
+          {{if .Spec}}<tr class="why-row" id="spec-{{$i}}">
+            <td colspan="3"><pre class="why-text spec">{{.Spec}}</pre></td>
+          </tr>{{end}}
+          {{else}}
+          <tr>
+            <td colspan="3" class="empty">The server offers no tools.</td>
+          </tr>
+          {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+</div>
+{{end}}{{end}}

@@ -1,0 +1,17 @@
+# Written by `wayfindr service install`, which replaces it;
+# `wayfindr service uninstall` removes it.
+[Unit]
+Description=Wayfindr MCP gateway
+
+[Service]
+ExecStart="/Users/Jane Doe/bin/wayfindr" start --foreground --log-file "<root>/data & 100%%/wayfindr.log"
+Environment="PATH=/opt/homebrew/bin:/usr/bin:/bin"
+Environment="WAYFINDR_CONFIG=<root>/my \"cfg\"/wayfindr.toml"
+Environment="WAYFINDR_DATA_DIR=<root>/data & 100%%"
+Environment="XDG_CONFIG_HOME=<root>/xdg-config"
+Environment="XDG_DATA_HOME=<root>/xdg-data"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

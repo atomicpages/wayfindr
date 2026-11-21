@@ -1,0 +1,45 @@
+# Expected failures for `make conformance` at protocol version 2025-06-18
+# (scripts/conformance.sh), read by the suite's --expected-failures flag.
+#
+# Format: a `server:` list of `<scenario>:<check-id>` entries (no space after
+# the colon), one per check that may fail or warn. Check IDs are the `id`
+# fields in bin/conformance/<version>/server-<scenario>-*/checks.json. The
+# suite fails the run on any failing or warning check not listed here, even
+# in a scenario that has listed checks, and on a listed check that now
+# passes, so keep it exact. The suite also accepts a bare `<scenario>` entry,
+# which excuses every check in the scenario; don't use it, since it would
+# hide a regression in that scenario's other checks (wire-schema-valid, the
+# tools/list checks).
+#
+# Nearly every entry calls a fixture of the suite's reference server (tools
+# named test_*, prompts, resources, completions, subscriptions). By design
+# Wayfindr exposes only search_tools and call_tool, and no prompts or
+# resources (ADR 0001), so these fail with "unknown tool" or, for prompts,
+# resources, and completions, which the gateway does not declare, "method not
+# found" (-32601, design §7.6). They say nothing about protocol conformance.
+# Scenarios that test the protocol itself are not listed and must pass.
+# docs/internal/compat.md, "Conformance results", gives each reason.
+server:
+  # Fixture tools, prompts, resources, completions, and subscriptions.
+  - completion-complete:completion-complete
+  - tools-call-simple-text:tools-call-simple-text
+  - tools-call-image:tools-call-image
+  - tools-call-audio:tools-call-audio
+  - tools-call-embedded-resource:tools-call-embedded-resource
+  - tools-call-mixed-content:tools-call-mixed-content
+  - tools-call-with-logging:tools-call-with-logging
+  - tools-call-error:tools-call-error
+  - tools-call-with-progress:tools-call-with-progress
+  - tools-call-sampling:tools-call-sampling
+  - tools-call-elicitation:tools-call-elicitation
+  - resources-list:resources-list
+  - resources-read-text:resources-read-text
+  - resources-read-binary:resources-read-binary
+  - resources-templates-read:resources-templates-read
+  - resources-subscribe:resources-subscribe
+  - resources-unsubscribe:resources-unsubscribe
+  - prompts-list:prompts-list
+  - prompts-get-simple:prompts-get-simple
+  - prompts-get-with-args:prompts-get-with-args
+  - prompts-get-embedded-resource:prompts-get-embedded-resource
+  - prompts-get-with-image:prompts-get-with-image

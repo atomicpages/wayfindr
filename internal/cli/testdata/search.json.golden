@@ -1,0 +1,59 @@
+{
+  "embedding": {
+    "mode": "on",
+    "model": "text-embedding-3-small"
+  },
+  "tools": [
+    {
+      "name": "linear.create_issue",
+      "title": "Create issue",
+      "summary": "Create a new issue in a team.",
+      "score": {
+        "lexical_rank": 2,
+        "lexical": 7.41,
+        "vector_rank": 1,
+        "cosine": 0.712,
+        "fused": 0.30952380952380953
+      }
+    },
+    {
+      "name": "github.create_issue",
+      "summary": "Create a new issue in a repository.",
+      "score": {
+        "lexical_rank": 1,
+        "lexical": 7.88,
+        "vector_rank": 3,
+        "cosine": 0.655,
+        "fused": 0.2916666666666667
+      }
+    },
+    {
+      "name": "jira.create_ticket",
+      "summary": "Create a Jira ticket.",
+      "score": {
+        "lexical_rank": 0,
+        "lexical": 0,
+        "vector_rank": 2,
+        "cosine": 0.69,
+        "fused": 0.14285714285714285
+      }
+    }
+  ],
+  "page": 1,
+  "size": 3,
+  "has_more": true,
+  "unavailable": [
+    {
+      "connector": "jira",
+      "status": "needs_auth",
+      "summary": "jira needs you to sign in again.",
+      "action": "Run wayfindr auth login jira."
+    }
+  ],
+  "warnings": [
+    {
+      "connector": "github",
+      "summary": "github's refresh token expires in 3 days."
+    }
+  ]
+}

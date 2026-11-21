@@ -1,0 +1,414 @@
+[
+  {
+    "name": "list_issues",
+    "description": "List issues in the user's Linear workspace",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "An optional search query"
+        },
+        "teamId": { "type": "string", "description": "The team UUID" },
+        "stateId": { "type": "string", "description": "The state UUID" },
+        "assigneeId": {
+          "type": "string",
+          "description": "The UUID of the assignee"
+        },
+        "projectId": { "type": "string", "description": "The project UUID" },
+        "limit": {
+          "type": "number",
+          "description": "The number of issues to return"
+        },
+        "includeArchived": {
+          "type": "boolean",
+          "description": "Whether to include archived issues"
+        }
+      }
+    }
+  },
+  {
+    "name": "list_my_issues",
+    "description": "List issues assigned to the current user",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "The number of items to return"
+        },
+        "before": { "type": "string", "description": "A UUID to end at" },
+        "after": { "type": "string", "description": "A UUID to start from" },
+        "orderBy": { "type": "string", "description": "The order to sort by" }
+      }
+    }
+  },
+  {
+    "name": "get_issue",
+    "description": "Retrieve a Linear issue details by ID, including attachments",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The issue ID" }
+      },
+      "required": ["id"]
+    }
+  },
+  {
+    "name": "create_issue",
+    "description": "Create a new Linear issue",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "The issue title" },
+        "description": {
+          "type": "string",
+          "description": "The issue description as Markdown"
+        },
+        "teamId": { "type": "string", "description": "The team UUID" },
+        "priority": {
+          "type": "number",
+          "description": "The issue priority. 0 = No priority, 1 = Urgent, 2 = High, 3 = Normal, 4 = Low."
+        },
+        "projectId": {
+          "type": "string",
+          "description": "The project ID to add the issue to"
+        },
+        "assigneeId": { "type": "string", "description": "The assignee ID" },
+        "stateId": { "type": "string", "description": "The issue state ID" },
+        "labelIds": {
+          "type": "array",
+          "description": "Array of label IDs to set on the issue"
+        },
+        "dueDate": {
+          "type": "string",
+          "description": "The due date for the issue in ISO format"
+        }
+      },
+      "required": ["title", "teamId"]
+    }
+  },
+  {
+    "name": "update_issue",
+    "description": "Update an existing Linear issue",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The issue ID" },
+        "title": { "type": "string", "description": "The issue title" },
+        "description": {
+          "type": "string",
+          "description": "The issue description as Markdown"
+        },
+        "priority": { "type": "number", "description": "The issue priority" },
+        "projectId": {
+          "type": "string",
+          "description": "The project ID to add the issue to"
+        },
+        "assigneeId": { "type": "string", "description": "The assignee ID" },
+        "stateId": { "type": "string", "description": "The issue state ID" },
+        "estimate": {
+          "type": "number",
+          "description": "The numerical issue estimate value"
+        },
+        "labelIds": {
+          "type": "array",
+          "description": "Array of label IDs to set on the issue"
+        }
+      },
+      "required": ["id"]
+    }
+  },
+  {
+    "name": "get_issue_git_branch_name",
+    "description": "Retrieve the branch name for a Linear issue by ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The issue ID" }
+      },
+      "required": ["id"]
+    }
+  },
+  {
+    "name": "list_comments",
+    "description": "Retrieve comments for a Linear issue by ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "issueId": { "type": "string", "description": "The issue ID" }
+      },
+      "required": ["issueId"]
+    }
+  },
+  {
+    "name": "create_comment",
+    "description": "Create a comment on a Linear issue by ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "issueId": { "type": "string", "description": "The issue ID" },
+        "body": {
+          "type": "string",
+          "description": "The content of the comment as Markdown"
+        },
+        "parentId": {
+          "type": "string",
+          "description": "A parent comment ID to reply to"
+        }
+      },
+      "required": ["issueId", "body"]
+    }
+  },
+  {
+    "name": "list_issue_statuses",
+    "description": "List available issues statuses in a Linear team",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "description": "The team UUID" }
+      },
+      "required": ["teamId"]
+    }
+  },
+  {
+    "name": "get_issue_status",
+    "description": "Retrieve details of a specific issue status in Linear by name or ID",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The UUID or name of the issue status to retrieve"
+        },
+        "teamId": { "type": "string", "description": "The team UUID" }
+      },
+      "required": ["query", "teamId"]
+    }
+  },
+  {
+    "name": "list_issue_labels",
+    "description": "List available issue labels in a Linear workspace or team",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "description": "The team UUID" }
+      }
+    }
+  },
+  {
+    "name": "create_issue_label",
+    "description": "Create a new Linear issue label",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Label name" },
+        "color": { "type": "string", "description": "Hex color code" },
+        "description": { "type": "string", "description": "Label description" },
+        "teamId": {
+          "type": "string",
+          "description": "Team UUID (omit for workspace label)"
+        }
+      },
+      "required": ["name"]
+    }
+  },
+  {
+    "name": "list_projects",
+    "description": "List projects in the user's Linear workspace",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "teamId": {
+          "type": "string",
+          "description": "A team UUID to filter by"
+        },
+        "includeArchived": {
+          "type": "boolean",
+          "description": "Whether to include archived projects"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_project",
+    "description": "Retrieve details of a specific project in Linear",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The ID or name of the project to retrieve"
+        }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "create_project",
+    "description": "Create a new project in Linear",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "A descriptive name of the project"
+        },
+        "summary": {
+          "type": "string",
+          "description": "A concise plaintext summary of the project (max 255 chars)"
+        },
+        "description": {
+          "type": "string",
+          "description": "The full project description in Markdown format"
+        },
+        "startDate": {
+          "type": "string",
+          "description": "The start date of the project in ISO format"
+        },
+        "targetDate": {
+          "type": "string",
+          "description": "The target date of the project in ISO format"
+        },
+        "teamId": {
+          "type": "string",
+          "description": "The UUID of the team associated with the project"
+        }
+      },
+      "required": ["name", "teamId"]
+    }
+  },
+  {
+    "name": "update_project",
+    "description": "Update an existing Linear project",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The ID of the project to update"
+        },
+        "name": {
+          "type": "string",
+          "description": "The new name of the project"
+        },
+        "summary": {
+          "type": "string",
+          "description": "A concise plaintext summary"
+        },
+        "targetDate": {
+          "type": "string",
+          "description": "The target date in ISO format"
+        }
+      },
+      "required": ["id"]
+    }
+  },
+  {
+    "name": "list_teams",
+    "description": "List teams in the user's Linear workspace",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "An optional search query"
+        },
+        "includeArchived": {
+          "type": "boolean",
+          "description": "Whether to include archived teams"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_team",
+    "description": "Retrieve details of a specific Linear team",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The UUID, key, or name of the team to retrieve"
+        }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "list_users",
+    "description": "Retrieve users in the Linear workspace",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "description": "An optional search query" }
+      }
+    }
+  },
+  {
+    "name": "get_user",
+    "description": "Retrieve details of a specific Linear user",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The UUID or name of the user to retrieve"
+        }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "list_cycles",
+    "description": "Retrieve cycles for a specific Linear team",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "description": "The team ID" },
+        "type": {
+          "type": "string",
+          "description": "Retrieve current, previous, next or all cycles"
+        }
+      },
+      "required": ["teamId"]
+    }
+  },
+  {
+    "name": "list_documents",
+    "description": "List documents in the user's Linear workspace",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "An optional search query"
+        },
+        "projectId": { "type": "string", "description": "Filter by project ID" }
+      }
+    }
+  },
+  {
+    "name": "get_document",
+    "description": "Retrieve a Linear document by ID or slug",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The document ID or slug" }
+      },
+      "required": ["id"]
+    }
+  },
+  {
+    "name": "search_documentation",
+    "description": "Search Linear's documentation to learn about features and usage",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "description": "The search query" },
+        "page": { "type": "number", "description": "The page number" }
+      },
+      "required": ["query"]
+    }
+  }
+]

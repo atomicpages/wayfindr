@@ -1,0 +1,4 @@
+# Check out text files with LF on every OS. Git for Windows defaults to
+# core.autocrlf=true, which turns the test goldens and embedded assets into
+# CRLF, while the code under test writes LF (wayfindr-w653).
+* text=auto eol=lf

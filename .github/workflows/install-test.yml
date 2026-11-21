@@ -1,0 +1,130 @@
+# Runs the one-line installers (docs/public/install.sh and install.ps1) the way
+# users do, piped into the shell, against the archives and checksums.txt in
+# an artifact (the "dist" artifact from goreleaser.yml). Checks that the
+# installed binary reports a real version, and that a tampered checksums.txt
+# installs nothing.
+name: Install test
+
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        description: Artifact holding the archives and checksums.txt.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    name: install.sh (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: docs/public
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: ${{ runner.temp }}/dist
+      - name: Install
+        run: |
+          WAYFINDR_DOWNLOAD_URL="file://$RUNNER_TEMP/dist" WAYFINDR_INSTALL_DIR="$RUNNER_TEMP/bin" \
+            sh < docs/public/install.sh
+          out=$("$RUNNER_TEMP/bin/wayfindr" version)
+          echo "$out"
+          echo "$out" | grep -Eq '^wayfindr v[0-9]+\.[0-9]+\.[0-9]+[^ ]* \(commit [0-9a-f]{7,}, go[0-9.]+\)$' ||
+            { echo "::error::unexpected version output: $out"; exit 1; }
+      - name: Refuse a bad checksum
+        run: |
+          bad="$RUNNER_TEMP/bad"
+          mkdir -p "$bad"
+          cp -f "$RUNNER_TEMP"/dist/*.tar.gz "$bad/"
+          awk '{ printf "%064d  %s\n", 0, $2 }' "$RUNNER_TEMP/dist/checksums.txt" > "$bad/checksums.txt"
+          if out=$(WAYFINDR_DOWNLOAD_URL="file://$bad" WAYFINDR_INSTALL_DIR="$RUNNER_TEMP/bad-bin" sh < docs/public/install.sh 2>&1); then
+            echo "::error::install.sh installed an archive whose checksum does not match"
+            exit 1
+          fi
+          echo "$out"
+          echo "$out" | grep -q 'checksum mismatch' || { echo "::error::install.sh failed for another reason"; exit 1; }
+          test ! -e "$RUNNER_TEMP/bad-bin/wayfindr"
+
+  windows:
+    name: install.ps1 (${{ matrix.shell }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows PowerShell 5.1 is what `irm | iex` runs in on a stock machine.
+        shell: [powershell, pwsh]
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: docs/public
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: ${{ runner.temp }}/dist
+      - name: Install
+        run: |
+          $env:WAYFINDR_DOWNLOAD_URL = ([Uri](Join-Path $env:RUNNER_TEMP 'dist')).AbsoluteUri
+          $env:WAYFINDR_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'bin'
+          Get-Content -Raw docs/public/install.ps1 | Invoke-Expression
+          $out = & (Join-Path $env:WAYFINDR_INSTALL_DIR 'wayfindr.exe') version
+          Write-Host $out
+          if ($out -notmatch '^wayfindr v\d+\.\d+\.\d+\S* \(commit [0-9a-f]{7,}, go[\d.]+\)$') {
+            Write-Host "::error::unexpected version output: $out"
+            exit 1
+          }
+      - name: Upgrade over a running copy
+        run: |
+          # A daemon started before an upgrade keeps running from the renamed
+          # wayfindr.exe.old, so the next upgrade can't remove that file. Stand
+          # in for the daemon with a long-running exe at the install path, then
+          # upgrade twice.
+          $env:WAYFINDR_DOWNLOAD_URL = ([Uri](Join-Path $env:RUNNER_TEMP 'dist')).AbsoluteUri
+          $env:WAYFINDR_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'bin'
+          $exe = Join-Path $env:WAYFINDR_INSTALL_DIR 'wayfindr.exe'
+          Copy-Item (Join-Path $env:SystemRoot 'System32\PING.EXE') $exe -Force
+          $running = Start-Process -FilePath $exe -ArgumentList '-n', '300', '127.0.0.1' -PassThru -WindowStyle Hidden
+          try {
+            Get-Content -Raw docs/public/install.ps1 | Invoke-Expression
+            Get-Content -Raw docs/public/install.ps1 | Invoke-Expression
+            & $exe version
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if (Test-Path "$exe.new") { Write-Host '::error::install.ps1 left wayfindr.exe.new behind'; exit 1 }
+            if (-not (Get-ChildItem "$exe.old-*")) { Write-Host '::error::expected the held .old to force a unique name'; exit 1 }
+          } finally {
+            $running | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+      - name: Refuse a bad checksum
+        run: |
+          $bad = Join-Path $env:RUNNER_TEMP 'bad'
+          New-Item -ItemType Directory -Path $bad | Out-Null
+          Copy-Item (Join-Path $env:RUNNER_TEMP 'dist\*.zip') $bad
+          Get-Content (Join-Path $env:RUNNER_TEMP 'dist\checksums.txt') |
+            ForEach-Object { ('0' * 64) + '  ' + (-split $_)[1] } |
+            Set-Content (Join-Path $bad 'checksums.txt')
+          $env:WAYFINDR_DOWNLOAD_URL = ([Uri]$bad).AbsoluteUri
+          $env:WAYFINDR_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'bad-bin'
+          $err = $null
+          try { Get-Content -Raw docs/public/install.ps1 | Invoke-Expression } catch { $err = "$_" }
+          Write-Host "install.ps1: $err"
+          if ($err -notmatch 'checksum mismatch') {
+            Write-Host '::error::install.ps1 did not refuse the bad checksum'
+            exit 1
+          }
+          if (Test-Path (Join-Path $env:WAYFINDR_INSTALL_DIR 'wayfindr.exe')) {
+            Write-Host '::error::install.ps1 installed an archive whose checksum does not match'
+            exit 1
+          }

@@ -1,0 +1,10 @@
+{{define "content"}}
+<section class="card">
+<div class="card-head"><h2>Enter this code</h2><p>Sign in with {{.Body.Connector}}'s provider on this or any other device, and enter the code there.</p></div>
+<div class="card-body">
+<p><code class="user-code">{{.Body.UserCode}}</code></p>
+<p>at <a href="{{.Body.URI}}" target="_blank" rel="noopener noreferrer">{{.Body.URI}}</a></p>
+<p>Wayfindr finishes on its own once you have allowed access, before {{.Body.Expires}}. <a href="/ui/connectors/{{.Body.Connector}}">Back to {{.Body.Connector}}</a></p>
+</div>
+</section>
+{{end}}

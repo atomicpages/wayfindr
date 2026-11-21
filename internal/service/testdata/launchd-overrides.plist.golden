@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Written by `wayfindr service install`, which replaces it; `wayfindr service uninstall` removes it. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.wayfindr.daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/Jane Doe/bin/wayfindr</string>
+		<string>start</string>
+		<string>--foreground</string>
+		<string>--log-file</string>
+		<string><root>/data &amp; 100%/wayfindr.log</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/bin:/bin</string>
+		<key>WAYFINDR_CONFIG</key>
+		<string><root>/my &#34;cfg&#34;/wayfindr.toml</string>
+		<key>WAYFINDR_DATA_DIR</key>
+		<string><root>/data &amp; 100%</string>
+		<key>XDG_CONFIG_HOME</key>
+		<string><root>/xdg-config</string>
+		<key>XDG_DATA_HOME</key>
+		<string><root>/xdg-data</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>StandardOutPath</key>
+	<string><root>/data &amp; 100%/wayfindr.log</string>
+	<key>StandardErrorPath</key>
+	<string><root>/data &amp; 100%/wayfindr.log</string>
+</dict>
+</plist>

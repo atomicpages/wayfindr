@@ -1,0 +1,21 @@
+# Build output
+bin/
+dist/
+
+# Agent worktrees
+.claude/worktrees/
+.kata.local.toml
+
+# Docs site (VitePress)
+node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+docs/.vitepress/.temp/
+.DS_Store
+docs/internal/plans
+assets/branding/
+.env*
+
+# Agent skills (vendored; kept locally, reinstall from skills-lock.json)
+.agents/
+.claude/skills/

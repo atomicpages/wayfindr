@@ -1,0 +1,10 @@
+Embeddings: on (text-embedding-3-small)
+
+RANK  TOOL                 FUSED   LEXICAL   VECTOR
+1     linear.create_issue  0.3095  #2  7.41  #1  0.712
+2     github.create_issue  0.2917  #1  7.88  #3  0.655
+3     jira.create_ticket   0.1429  -         #2  0.690
+
+Unavailable: jira (needs_auth): jira needs you to sign in again.
+Warning: github: github's refresh token expires in 3 days.
+More results: run the same command with --page 2

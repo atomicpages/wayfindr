@@ -1,0 +1,43 @@
+# Verbatim from prd.md, "Functional requirements > Configuration (ADR 0006)".
+# Keep the body below byte-for-byte in sync with that example.
+
+[server]
+listen = "127.0.0.1:7777"
+
+[storage]
+driver = "sqlite" # or "postgres"
+dsn = "~/.local/share/wayfindr/wayfindr.db"
+
+[embedding] # omit this table → fuzzy-only search
+base_url = "http://localhost:11434/v1"
+model = "qwen3-embedding"
+dimensions = 1024
+
+[index]
+refresh_interval = "1h"
+
+[connectors.linear] # OAuth, discovered (DCR)
+url = "https://mcp.linear.app/mcp"
+auth = { type = "oauth" }
+
+[connectors.slack] # OAuth, bring your own app
+url = "https://mcp.slack.com/mcp"
+[connectors.slack.auth]
+type = "oauth"
+client_id = "1234.5678"
+client_secret = "${secret:slack_client_secret}"
+scopes = ["channels:read", "chat:write"]
+# redirect_uri = "https://abc.ngrok.app/oauth/callback"
+# validate_issuer = false
+
+[connectors.exa] # API key
+url = "https://mcp.exa.ai/mcp"
+headers = { "x-api-key" = "${env:EXA_API_KEY}" }
+
+[connectors.deepwiki] # no auth
+url = "https://mcp.deepwiki.com/mcp"
+
+[connectors.fs] # stdio
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "~/code"]
+env = { LOG_LEVEL = "warn" }

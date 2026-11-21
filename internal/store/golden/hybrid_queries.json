@@ -1,0 +1,58 @@
+[
+  {
+    "kind": "natural",
+    "query": "show the commit history",
+    "top5": ["github.list_commits", "git.git_log"]
+  },
+  {
+    "kind": "natural",
+    "query": "send a message to a slack channel",
+    "first": "slack.slack_post_message"
+  },
+  {
+    "kind": "natural",
+    "query": "who am i",
+    "top5": ["github.get_me", "sentry.whoami"]
+  },
+  {
+    "kind": "natural",
+    "query": "how much money is in my stripe account",
+    "top5": ["stripe.retrieve_balance"]
+  },
+  {
+    "kind": "natural",
+    "query": "find people in the slack workspace",
+    "top5": ["slack.slack_get_users"]
+  },
+
+  {
+    "kind": "synonym",
+    "query": "make a new folder",
+    "top5": ["filesystem.create_directory"]
+  },
+  {
+    "kind": "synonym",
+    "query": "visit a website",
+    "top5": ["playwright.browser_navigate"]
+  },
+  {
+    "kind": "synonym",
+    "query": "terminate a recurring payment plan",
+    "top5": ["stripe.cancel_subscription"]
+  },
+  {
+    "kind": "synonym",
+    "query": "make a copy of a notion page",
+    "top5": ["notion.notion-duplicate-page"]
+  },
+  {
+    "kind": "synonym",
+    "query": "tickets assigned to me",
+    "top5": ["linear.list_my_issues"]
+  },
+  {
+    "kind": "synonym",
+    "query": "erase a file from the repo",
+    "top5": ["github.delete_file"]
+  }
+]

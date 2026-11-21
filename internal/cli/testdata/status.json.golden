@@ -1,0 +1,100 @@
+{
+  "version": "v1.2.3",
+  "connectors": [
+    {
+      "name": "files",
+      "state": "unreachable",
+      "since": "2026-11-04T10:00:00Z",
+      "advice": {
+        "summary": "The upstream refused the connection.",
+        "action": "Check that the server is running at the connector's url. Wayfindr reconnects on the next call."
+      },
+      "tools": 0,
+      "last_sync": {
+        "at": "2026-11-04T10:05:00Z",
+        "error": "connection refused"
+      },
+      "warnings": [
+        {
+          "code": "stuck",
+          "summary": "The connector has not been ready since 2026-11-04T10:00:00Z.",
+          "action": "Check that the server is running at the connector's url. Wayfindr reconnects on the next call."
+        }
+      ]
+    },
+    {
+      "name": "github",
+      "state": "ready",
+      "since": "2026-11-04T10:00:00Z",
+      "tools": 12,
+      "last_sync": {
+        "at": "2026-11-04T10:05:00Z"
+      },
+      "token_expires_at": "2026-11-04T11:00:00Z",
+      "warnings": [
+        {
+          "code": "no_refresh",
+          "summary": "The access token expires at 2026-11-04T11:00:00Z and cannot be refreshed.",
+          "action": "Authorize again before then to avoid an interruption.",
+          "link": "http://127.0.0.1:7777/auth/github"
+        }
+      ]
+    },
+    {
+      "name": "linear",
+      "state": "needs_auth",
+      "since": "2026-11-04T10:00:00Z",
+      "advice": {
+        "summary": "The connector has not been authorized yet.",
+        "action": "Open the link to authorize it.",
+        "link": "http://127.0.0.1:7777/auth/linear"
+      },
+      "tools": 0
+    },
+    {
+      "name": "notes",
+      "state": "unreachable",
+      "since": "2026-11-04T10:00:00Z",
+      "advice": {
+        "summary": "The upstream cannot be reached.",
+        "action": "Check that it is running and the network. Wayfindr reconnects on the next call."
+      },
+      "tools": 0
+    },
+    {
+      "name": "search",
+      "state": "starting",
+      "since": "2026-11-04T10:00:00Z",
+      "advice": {
+        "summary": "The connector is still connecting.",
+        "action": "Try again in a moment."
+      },
+      "tools": 0
+    },
+    {
+      "name": "slack",
+      "state": "ready",
+      "since": "2026-11-04T10:00:00Z",
+      "tools": 4,
+      "hidden_tools": 2,
+      "last_sync": {
+        "at": "2026-11-04T10:05:00Z"
+      },
+      "token_expires_at": "2026-11-11T10:00:00Z",
+      "warnings": [
+        {
+          "code": "no_refresh",
+          "note": true,
+          "summary": "The access token expires at 2026-11-11T10:00:00Z and cannot be refreshed.",
+          "action": "Authorize again before then to avoid an interruption.",
+          "link": "http://127.0.0.1:7777/auth/slack"
+        }
+      ]
+    }
+  ],
+  "orphaned_credentials": [
+    "old",
+    "older"
+  ],
+  "config_error": "load config wayfindr.toml: connectors.x.url: must be an absolute URL"
+}

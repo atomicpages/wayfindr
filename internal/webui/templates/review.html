@@ -1,0 +1,30 @@
+{{define "content"}}{{with .Body}}
+<div class="page-head">
+  <div>
+    <h1>Review {{.Name}}</h1>
+    <p>This command runs on this computer, as you, each time Wayfindr connects to {{.Name}}. Add it only if you trust it.</p>
+  </div>
+</div>
+<div class="alert warn">{{icon "alert"}}<div><b>Nothing runs until you select Add and run</b><p>Check the command and each argument below. Wayfindr starts it directly, without a shell.</p></div></div>
+<div class="card">
+  <dl class="review">
+    <div><dt>Command</dt><dd><code class="argv">{{.Command}}</code></dd></div>
+    <div><dt>Arguments</dt><dd>{{range .Args}}<code class="argv">{{.}}</code>{{else}}<span class="muted">None</span>{{end}}</dd></div>
+    <div><dt>Environment</dt><dd>{{range .Env}}<code class="argv">{{.Name}}={{.Value}}</code>{{else}}<span class="muted">None</span>{{end}}</dd></div>
+    <div><dt>Secret variables</dt><dd>{{range .SecretEnv}}<code class="argv">{{.}}=••••••</code>{{else}}<span class="muted">None</span>{{end}}</dd></div>
+    {{with .Timeout}}<div><dt>Call timeout</dt><dd>{{.}}</dd></div>{{end}}
+  </dl>
+</div>
+<div class="actions">
+  <form method="post" action="/ui/add/confirm">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="token" value="{{.Token}}">
+    <button class="btn btn-primary" type="submit">Add and run</button>
+  </form>
+  <form method="post" action="/ui/add/back">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="token" value="{{.Token}}">
+    <button class="btn btn-outline" type="submit">Back</button>
+  </form>
+</div>
+{{end}}{{end}}

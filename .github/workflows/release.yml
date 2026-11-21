@@ -1,0 +1,56 @@
+# Pushing a v* tag runs the checks, builds a draft release with checksums and
+# build provenance, installs those exact archives with the one-line installers,
+# and only then publishes the release. A failure at any step leaves at most a
+# draft, which nobody can download. See docs/internal/releasing.md.
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  goreleaser:
+    needs: checks
+    permissions:
+      contents: write # create the draft release and upload assets
+      id-token: write # sign the provenance attestation
+      attestations: write # store it
+    uses: ./.github/workflows/goreleaser.yml
+    with:
+      snapshot: false
+
+  install:
+    needs: goreleaser
+    uses: ./.github/workflows/install-test.yml
+    with:
+      artifact: dist
+
+  publish:
+    name: Publish release
+    needs: install
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # A tag with a suffix (v0.2.0-rc.1) stays a pre-release and never
+          # becomes Latest, so the installers' default skips it.
+          case "$TAG" in
+          *-*) gh release edit "$TAG" --draft=false ;;
+          *) gh release edit "$TAG" --draft=false --latest ;;
+          esac

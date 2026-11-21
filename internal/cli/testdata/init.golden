@@ -1,0 +1,85 @@
+Wayfindr is set up.
+
+  Config        <root>/config/wayfindr/wayfindr.toml (created)
+  Data dir      <root>/data/wayfindr
+  Master key    OS keychain
+  Client token  <root>/data/wayfindr/client-token (created)
+
+Add a connector
+---------------
+
+  wayfindr connector add linear --url https://mcp.linear.app/mcp
+  wayfindr connector add fs -- npx -y @modelcontextprotocol/server-filesystem ~/src
+
+The command asks an HTTP server whether it uses OAuth and offers to
+authorize it. wayfindr status shows every connector's state.
+
+Connect a client
+----------------
+
+Add Wayfindr to your harness with the stdio shim (wayfindr stdio). The shim
+reads the client token itself and starts the daemon if it is not running.
+It needs wayfindr on the harness's PATH.
+
+Claude Code: run
+  claude mcp add --scope user --transport stdio wayfindr -- wayfindr stdio
+
+Codex: run
+  codex mcp add wayfindr -- wayfindr stdio
+
+OpenCode: run
+  opencode mcp add --global wayfindr -- wayfindr stdio
+
+Hermes Agent: run
+  hermes mcp add wayfindr --command wayfindr --args stdio
+
+Gemini CLI: run
+  gemini mcp add --scope user wayfindr wayfindr stdio
+
+GitHub Copilot CLI: run
+  copilot mcp add wayfindr -- wayfindr stdio
+
+VS Code: run
+  code --add-mcp '{"name":"wayfindr","type":"stdio","command":"wayfindr","args":["stdio"]}'
+
+Cursor: add to ~/.cursor/mcp.json
+{
+  "mcpServers": {
+    "wayfindr": { "type": "stdio", "command": "wayfindr", "args": ["stdio"] }
+  }
+}
+
+Zed: add to settings.json
+{
+  "context_servers": {
+    "wayfindr": { "command": "wayfindr", "args": ["stdio"] }
+  }
+}
+
+Windsurf (Devin Desktop): add to ~/.config/devin/mcp_config.json
+{
+  "mcpServers": {
+    "wayfindr": { "command": "wayfindr", "args": ["stdio"] }
+  }
+}
+
+goose: add to ~/.config/goose/config.yaml
+extensions:
+  wayfindr:
+    type: stdio
+    name: wayfindr
+    cmd: wayfindr
+    args: [stdio]
+    enabled: true
+    timeout: 300
+
+To connect over HTTP instead (http://127.0.0.1:7777/mcp), start the daemon
+(wayfindr start) and set the client token where the harness runs:
+
+  export WAYFINDR_CLIENT_TOKEN="$(cat '<root>/data/wayfindr/client-token')"
+
+HTTP setup for each harness: https://atomicpages.github.io/wayfindr/guide/clients
+
+Usage telemetry is off by default. To send the maintainers an anonymous
+daily usage report, set enabled = true under [telemetry] in the config.
+What it holds: https://atomicpages.github.io/wayfindr/reference/telemetry

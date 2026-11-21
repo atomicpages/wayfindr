@@ -1,0 +1,44 @@
+{{define "content"}}{{with .Body}}
+<div class="page-head">
+  <div>
+    <h1>Search</h1>
+    <p>See what <code>search_tools</code> returns to a client for a query, and why each tool ranked where it did.</p>
+  </div>
+</div>
+<form class="searchbar" method="get" action="/ui/search" role="search">
+  <div class="searchbox">{{icon "search"}}<label class="sr" for="q">Query</label><input id="q" name="q" type="search" value="{{.Query}}" placeholder="open a ticket for the login bug" autocomplete="off"></div>
+  <button class="btn btn-primary btn-lg" type="submit">Search tools</button>
+</form>
+{{if .Error}}
+<div class="alert err">{{icon "alert"}}<div><b>The search was refused</b><p>{{.Error}}</p></div></div>
+{{end}}
+{{if .Searched}}{{if not .Error}}
+{{if .Lexical}}<p class="note">Ranked by words only{{if .Reason}}: the embedding provider failed ({{.Reason}}){{else}}: no embedding provider is configured{{end}}.</p>{{end}}
+{{range .Unavailable}}<div class="alert warn">{{icon "alert"}}<div><b>{{.Connector}}: {{code .Summary}}</b>{{with .Action}}<p>{{code .}}</p>{{end}}</div></div>{{end}}
+{{range .Warnings}}<div class="alert warn">{{icon "alert"}}<div><b>{{.Connector}}: {{code .Summary}}</b>{{with .Action}}<p>{{code .}}</p>{{end}}</div></div>{{end}}
+<div class="card">
+  <div class="card-head"><div><h2>{{len .Rows}} {{if eq (len .Rows) 1}}result{{else}}results{{end}}</h2><p>Ranked by word matches{{if not .Lexical}} and meaning{{end}}, fused.</p></div></div>
+  {{if .Rows}}
+  <ol class="results">
+  {{range .Rows}}
+    <li>
+      <span class="rank num">{{.Rank}}</span>
+      <div>
+        <span class="tool">{{template "mini" .Logo}}<span><span class="ns">{{.Connector}}.</span>{{.Tool}}</span></span>
+        {{with .Title}}<div class="sub">{{.}}</div>{{end}}
+        {{with .Summary}}<div class="sub">{{.}}</div>{{end}}
+      </div>
+      <div class="score">
+        <span class="num">{{.Fused}}</span>
+        <span class="bar"><span class="fill w-{{.Share}}"></span></span>
+        <span class="sub">{{if .LexicalRank}}word rank {{.LexicalRank}}{{else}}no word match{{end}}{{if not $.Body.Lexical}}, {{if .VectorRank}}meaning rank {{.VectorRank}}{{else}}no meaning match{{end}}{{end}}</span>
+      </div>
+    </li>
+  {{end}}
+  </ol>
+  {{else}}
+  <p class="card-body muted">No tools match. Try the words a user would type, such as "create a ticket".</p>
+  {{end}}
+</div>
+{{end}}{{end}}
+{{end}}{{end}}

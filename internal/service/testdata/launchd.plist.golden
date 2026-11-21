@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Written by `wayfindr service install`, which replaces it; `wayfindr service uninstall` removes it. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.wayfindr.daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/wayfindr/bin/wayfindr</string>
+		<string>start</string>
+		<string>--foreground</string>
+		<string>--log-file</string>
+		<string><root>/home/.local/share/wayfindr/wayfindr.log</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>StandardOutPath</key>
+	<string><root>/home/.local/share/wayfindr/wayfindr.log</string>
+	<key>StandardErrorPath</key>
+	<string><root>/home/.local/share/wayfindr/wayfindr.log</string>
+</dict>
+</plist>

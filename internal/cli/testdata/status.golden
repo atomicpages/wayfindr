@@ -1,0 +1,36 @@
+CONNECTOR  STATE        TOOLS         LAST SYNC                      TOKEN EXPIRES
+files      unreachable  0             2026-11-04T10:05:00Z (failed)  -
+github     ready        12            2026-11-04T10:05:00Z           2026-11-04T11:00:00Z
+linear     needs_auth   0             never                          -
+notes      unreachable  0             never                          -
+search     starting     0             never                          -
+slack      ready        4 (2 hidden)  2026-11-04T10:05:00Z           2026-11-11T10:00:00Z
+
+files: The upstream refused the connection.
+  Check that the server is running at the connector's url. Wayfindr reconnects on the next call.
+  Last sync failed: connection refused
+
+linear: The connector has not been authorized yet.
+  Open the link to authorize it.
+  http://127.0.0.1:7777/auth/linear
+
+notes: The upstream cannot be reached.
+  Check that it is running and the network. Wayfindr reconnects on the next call.
+
+Warnings:
+  files: The connector has not been ready since 2026-11-04T10:00:00Z.
+    Check that the server is running at the connector's url. Wayfindr reconnects on the next call.
+  github: The access token expires at 2026-11-04T11:00:00Z and cannot be refreshed.
+    Authorize again before then to avoid an interruption.
+    http://127.0.0.1:7777/auth/github
+
+Notes:
+  slack: The access token expires at 2026-11-11T10:00:00Z and cannot be refreshed.
+    Authorize again before then to avoid an interruption.
+    http://127.0.0.1:7777/auth/slack
+
+Orphaned credentials (connectors no longer in the config): old, older
+  Remove each with `wayfindr auth logout <connector>`.
+
+Config error: the daemon keeps running its last good config.
+  load config wayfindr.toml: connectors.x.url: must be an absolute URL

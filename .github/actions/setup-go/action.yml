@@ -1,0 +1,12 @@
+name: Set up Go
+description: >-
+  Installs the latest stable Go and restores the module and build caches.
+  go.mod sets only the minimum version; CI and releases build with the newest
+  patch release so they pick up toolchain and standard-library security fixes.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: stable
+        cache-dependency-path: go.sum

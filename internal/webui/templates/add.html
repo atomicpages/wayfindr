@@ -1,0 +1,93 @@
+{{define "content"}}{{with .Body}}
+<div class="page-head">
+  <div>
+    <h1>Add connector</h1>
+    <p>Connect an MCP server. Wayfindr adds it to your config file, stores its secrets encrypted, and connects it.</p>
+  </div>
+</div>
+{{if .Error}}
+<div class="alert err" role="alert">{{icon "alert"}}<div><b>The connector wasn't added</b><p>{{.Error}}{{if .SecretsDropped}} Enter the secret values again.{{end}}</p></div></div>
+{{end}}
+<form class="card add-form" method="post" action="/ui/add">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <div class="card-body form spaced">
+    <fieldset class="field">
+      <legend>Kind</legend>
+      <div class="seg">
+        <label><input type="radio" id="kind-url" name="kind" value="url"{{if eq .Kind "url"}} checked{{end}}><span>Remote URL</span></label>
+        <label><input type="radio" id="kind-command" name="kind" value="command"{{if eq .Kind "command"}} checked{{end}}><span>Local command</span></label>
+      </div>
+    </fieldset>
+
+    <label class="field" for="add-name"><span>Name</span>
+      <input id="add-name" name="name" type="text" value="{{.Name}}" placeholder="linear" autocomplete="off" spellcheck="false" required>
+      <small class="hint">Lowercase letters, digits, and hyphens. Agents see tools as <code>name.tool</code>.</small>
+    </label>
+
+    <div class="url-only form">
+      <label class="field" for="add-url"><span>URL</span>
+        <input id="add-url" name="url" type="url" value="{{.URL}}" placeholder="https://mcp.linear.app/mcp" autocomplete="off" spellcheck="false">
+      </label>
+      <fieldset class="field">
+        <legend>Sign-in</legend>
+        <div class="radios">
+          <label class="check"><input type="radio" id="auth-detect" name="auth" value="detect"{{if eq .Auth "detect"}} checked{{end}}>Detect automatically</label>
+          <label class="check"><input type="radio" id="auth-oauth" name="auth" value="oauth"{{if eq .Auth "oauth"}} checked{{end}}>OAuth</label>
+          <label class="check"><input type="radio" id="auth-header" name="auth" value="header"{{if eq .Auth "header"}} checked{{end}}>API key in a header</label>
+          <label class="check"><input type="radio" id="auth-none" name="auth" value="none"{{if eq .Auth "none"}} checked{{end}}>None</label>
+        </div>
+      </fieldset>
+      <div class="header-only row2">
+        <label class="field" for="add-header-name"><span>Header</span><input id="add-header-name" name="header_name" type="text" value="{{.HeaderName}}" autocomplete="off" spellcheck="false"></label>
+        <label class="field" for="add-header-value"><span>Value</span><input id="add-header-value" name="header_value" type="password" placeholder="Bearer sk-…" autocomplete="off"></label>
+      </div>
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <div class="form">
+          <label class="check" for="add-sse"><input id="add-sse" type="checkbox" name="transport" value="sse"{{if .SSE}} checked{{end}}>Use the older SSE transport</label>
+          <div class="oauth-only row2">
+            <label class="field" for="add-client-id"><span>OAuth client ID</span><input id="add-client-id" name="client_id" type="text" value="{{.ClientID}}" autocomplete="off" spellcheck="false"></label>
+            <label class="field" for="add-client-secret"><span>OAuth client secret</span><input id="add-client-secret" name="client_secret" type="password" autocomplete="off"></label>
+          </div>
+          <label class="field oauth-only" for="add-scopes"><span>OAuth scopes</span><input id="add-scopes" name="scopes" type="text" value="{{.Scopes}}" placeholder="read write" autocomplete="off" spellcheck="false"></label>
+        </div>
+      </details>
+    </div>
+
+    <div class="command-only form">
+      <label class="field" for="add-command"><span>Command</span>
+        <input id="add-command" name="command" type="text" value="{{.Command}}" placeholder="npx" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field" for="add-args"><span>Arguments</span>
+        <textarea id="add-args" name="args" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;~/Documents" spellcheck="false">{{.Args}}</textarea>
+        <small class="hint">One per line, passed as is: no shell, no quoting.</small>
+      </label>
+      <label class="field" for="add-env"><span>Environment variables</span>
+        <textarea id="add-env" name="env" rows="2" placeholder="LOG_LEVEL=info" spellcheck="false">{{.Env}}</textarea>
+        <small class="hint">One <code>NAME=value</code> per line, written to the config file as is.</small>
+      </label>
+      <fieldset class="field">
+        <legend>Secret variables</legend>
+        <small class="hint">Stored encrypted, never written to the config file.</small>
+        {{range $i, $n := .SecretEnvNames}}
+        <div class="row2">
+          <label class="sr" for="add-sen-{{$i}}">Secret variable {{$i}} name</label>
+          <input id="add-sen-{{$i}}" name="secret_env_name_{{$i}}" type="text" value="{{$n}}" placeholder="API_KEY" autocomplete="off" spellcheck="false">
+          <label class="sr" for="add-sev-{{$i}}">Secret variable {{$i}} value</label>
+          <input id="add-sev-{{$i}}" name="secret_env_value_{{$i}}" type="password" placeholder="value" autocomplete="off">
+        </div>
+        {{end}}
+      </fieldset>
+    </div>
+
+    <label class="field" for="add-timeout"><span>Call timeout</span>
+      <input id="add-timeout" name="timeout" type="text" value="{{.Timeout}}" placeholder="2m" autocomplete="off" spellcheck="false">
+    </label>
+
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">{{icon "plus"}}<span class="url-only">Add connector</span><span class="command-only">Review command</span></button>
+      <a class="btn btn-ghost" href="/ui/">Cancel</a>
+    </div>
+  </div>
+</form>
+{{end}}{{end}}

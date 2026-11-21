@@ -1,0 +1,99 @@
+{{define "content"}}{{with .Body}}
+<div class="page-head">
+  <div>
+    <h1>Client tokens</h1>
+    <p>Give each client its own token, limited to the connectors it needs. Revoking one takes effect on its next
+      request.</p>
+  </div>
+</div>
+{{with .Created}}
+<div class="alert ok">{{icon "key"}}<div>
+    <b>Copy the token for {{.Name}} now</b>
+    <p>Wayfindr stores only a hash, so this is the only time you'll see it. Use it as the client's bearer token.</p>
+    <label class="sr" for="new-token">Token for {{.Name}}</label>
+    <input class="secret" id="new-token" type="text" readonly value="{{.Token}}" autocomplete="off" spellcheck="false">
+  </div>
+</div>
+{{end}}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Connectors</th>
+          <th class="hide-sm">Created</th>
+          <th>Last used</th>
+          <th class="r"><span class="sr">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="name">default</td>
+          <td class="muted">All connectors, and the admin API</td>
+          <td class="hide-sm muted">At init</td>
+          <td class="muted">—</td>
+          <td></td>
+        </tr>
+        {{range .Tokens}}
+        <tr>
+          <td class="name">{{.Name}}</td>
+          <td>
+            <div class="chips">{{range .Connectors}}<span class="badge secondary">{{template "mini" (logo
+                .)}}{{.}}</span>{{end}}</div>
+          </td>
+          <td class="hide-sm">{{.Created}}</td>
+          <td>{{.LastUsed}}</td>
+          <td class="r">
+            <form method="post" action="/ui/tokens/{{.Name}}/revoke">
+              <input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <button class="btn btn-destructive btn-sm" type="submit">Revoke</button>
+            </form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+<form class="card" method="post" action="/ui/tokens">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <div class="card-head">
+    <div>
+      <h2>Create a token</h2>
+      <p>The client can only find and call tools from the connectors you pick.</p>
+    </div>
+  </div>
+  <div class="card-body form">
+    <label class="field" for="token-name"><span>Name</span><input id="token-name" name="name" type="text"
+        value="{{.Name}}" placeholder="claude-desktop" autocomplete="off" required></label>
+    <fieldset class="field">
+      <legend>Connectors</legend>
+      {{if .Connectors}}
+      {{/* A disclosure of checkboxes: it opens and posts with no script.
+      console.js adds the filter, the chips, and closing. */}}
+      <details class="multi">
+        <summary>
+          <span class="multi-value">{{range .Connectors}}{{if index $.Body.Picked .}}<span
+              class="badge secondary chip">{{template "mini" (logo .)}}{{.}}</span>{{end}}{{end}}<span
+              class="multi-placeholder">Pick connectors</span></span>
+          {{icon "chev"}}
+        </summary>
+        <div class="multi-menu">
+          <input class="multi-filter" type="search" placeholder="Filter connectors" aria-label="Filter connectors"
+            autocomplete="off" spellcheck="false">
+          <div class="multi-options">
+            {{range .Connectors}}<label class="check" for="tc-{{.}}"><input type="checkbox" id="tc-{{.}}"
+                name="connector" value="{{.}}"{{if index $.Body.Picked .}} checked{{end}}>{{template "mini" (logo
+              .)}}{{.}}</label>{{end}}
+            <p class="multi-none muted" hidden>No connector matches.</p>
+          </div>
+        </div>
+      </details>
+      {{else}}<span class="muted">No connectors are configured.</span>{{end}}
+    </fieldset>
+    {{with .Error}}<p class="err-text" role="alert">{{.}}</p>{{end}}
+    <div><button class="btn btn-primary" type="submit">{{icon "plus"}}Create token</button></div>
+  </div>
+</form>
+{{end}}{{end}}

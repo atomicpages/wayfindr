@@ -1,0 +1,360 @@
+[
+  {
+    "name": "create_customer",
+    "description": "This tool will create a customer in Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The name of the customer."
+        },
+        "email": {
+          "type": "string",
+          "description": "The email of the customer."
+        }
+      },
+      "required": ["name"]
+    }
+  },
+  {
+    "name": "list_customers",
+    "description": "This tool will fetch a list of Customers from Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "description": "A limit on the number of objects to be returned. Limit can range between 1 and 100."
+        },
+        "email": {
+          "type": "string",
+          "description": "A case-sensitive filter on the list based on the customer's email field."
+        }
+      }
+    }
+  },
+  {
+    "name": "create_product",
+    "description": "This tool will create a product in Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "The name of the product." },
+        "description": {
+          "type": "string",
+          "description": "The description of the product."
+        }
+      },
+      "required": ["name"]
+    }
+  },
+  {
+    "name": "list_products",
+    "description": "This tool will fetch a list of Products from Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "description": "A limit on the number of objects to be returned."
+        }
+      }
+    }
+  },
+  {
+    "name": "create_price",
+    "description": "This tool will create a price in Stripe. If a product has not already been specified, a product should be created first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "product": {
+          "type": "string",
+          "description": "The ID of the product to create the price for."
+        },
+        "unit_amount": {
+          "type": "integer",
+          "description": "The unit amount of the price in cents."
+        },
+        "currency": {
+          "type": "string",
+          "description": "The currency of the price."
+        }
+      },
+      "required": ["product", "unit_amount", "currency"]
+    }
+  },
+  {
+    "name": "list_prices",
+    "description": "This tool will fetch a list of Prices from Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "product": {
+          "type": "string",
+          "description": "The ID of the product to list prices for."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "A limit on the number of objects to be returned."
+        }
+      }
+    }
+  },
+  {
+    "name": "create_payment_link",
+    "description": "This tool will create a payment link in Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "price": {
+          "type": "string",
+          "description": "The ID of the price to create the payment link for."
+        },
+        "quantity": {
+          "type": "integer",
+          "description": "The quantity of the product to include."
+        }
+      },
+      "required": ["price", "quantity"]
+    }
+  },
+  {
+    "name": "create_invoice",
+    "description": "This tool will create an invoice in Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer": {
+          "type": "string",
+          "description": "The ID of the customer to create the invoice for."
+        },
+        "days_until_due": {
+          "type": "integer",
+          "description": "The number of days until the invoice is due."
+        }
+      },
+      "required": ["customer"]
+    }
+  },
+  {
+    "name": "list_invoices",
+    "description": "This tool will fetch a list of Invoices from Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer": {
+          "type": "string",
+          "description": "The ID of the customer to list invoices for."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "A limit on the number of objects to be returned."
+        }
+      }
+    }
+  },
+  {
+    "name": "create_invoice_item",
+    "description": "This tool will create an invoice item in Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer": {
+          "type": "string",
+          "description": "The ID of the customer to create the invoice item for."
+        },
+        "price": {
+          "type": "string",
+          "description": "The ID of the price for the item."
+        },
+        "invoice": {
+          "type": "string",
+          "description": "The ID of the invoice to create the item for."
+        }
+      },
+      "required": ["customer", "price", "invoice"]
+    }
+  },
+  {
+    "name": "finalize_invoice",
+    "description": "This tool will finalize an invoice in Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "invoice": {
+          "type": "string",
+          "description": "The ID of the invoice to finalize."
+        }
+      },
+      "required": ["invoice"]
+    }
+  },
+  {
+    "name": "retrieve_balance",
+    "description": "This tool will retrieve the balance from Stripe. It takes no input.",
+    "inputSchema": { "type": "object", "properties": {} }
+  },
+  {
+    "name": "create_refund",
+    "description": "This tool will refund a payment intent in Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "payment_intent": {
+          "type": "string",
+          "description": "The ID of the PaymentIntent to refund."
+        },
+        "amount": {
+          "type": "integer",
+          "description": "The amount to refund in cents."
+        }
+      },
+      "required": ["payment_intent"]
+    }
+  },
+  {
+    "name": "list_payment_intents",
+    "description": "This tool will list payment intents in Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer": {
+          "type": "string",
+          "description": "The ID of the customer to list payment intents for."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "A limit on the number of objects to be returned."
+        }
+      }
+    }
+  },
+  {
+    "name": "list_subscriptions",
+    "description": "This tool will list all subscriptions in Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer": {
+          "type": "string",
+          "description": "The ID of the customer to list subscriptions for."
+        },
+        "price": {
+          "type": "string",
+          "description": "The ID of the price to list subscriptions for."
+        },
+        "status": {
+          "type": "string",
+          "description": "The status of the subscriptions to retrieve."
+        }
+      }
+    }
+  },
+  {
+    "name": "cancel_subscription",
+    "description": "This tool will cancel a subscription in Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "subscription": {
+          "type": "string",
+          "description": "The ID of the subscription to cancel."
+        }
+      },
+      "required": ["subscription"]
+    }
+  },
+  {
+    "name": "update_subscription",
+    "description": "This tool will update an existing subscription in Stripe, for example to change the price or quantity.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "subscription": {
+          "type": "string",
+          "description": "The ID of the subscription to update."
+        },
+        "items": {
+          "type": "array",
+          "description": "A list of subscription items to update, add, or remove."
+        },
+        "proration_behavior": {
+          "type": "string",
+          "description": "Determines how to handle prorations."
+        }
+      },
+      "required": ["subscription"]
+    }
+  },
+  {
+    "name": "list_coupons",
+    "description": "This tool will fetch a list of Coupons from Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "description": "A limit on the number of objects to be returned."
+        }
+      }
+    }
+  },
+  {
+    "name": "create_coupon",
+    "description": "This tool will create a coupon in Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the coupon displayed to customers on invoices or receipts."
+        },
+        "percent_off": {
+          "type": "number",
+          "description": "A positive float larger than 0, and smaller or equal to 100, that represents the discount the coupon will apply."
+        },
+        "duration": {
+          "type": "string",
+          "description": "How long the discount will last: once, repeating, or forever."
+        }
+      },
+      "required": ["name"]
+    }
+  },
+  {
+    "name": "list_disputes",
+    "description": "This tool will fetch a list of disputes in Stripe.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "charge": {
+          "type": "string",
+          "description": "Only return disputes associated to the charge specified by this charge ID."
+        },
+        "payment_intent": {
+          "type": "string",
+          "description": "Only return disputes associated to the PaymentIntent specified by this PaymentIntent ID."
+        }
+      }
+    }
+  },
+  {
+    "name": "search_stripe_documentation",
+    "description": "Search and retrieve relevant Stripe documentation to answer integration questions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "The user question about integrating with Stripe."
+        },
+        "language": {
+          "type": "string",
+          "description": "The programming language to search for in the docs."
+        }
+      },
+      "required": ["question"]
+    }
+  }
+]

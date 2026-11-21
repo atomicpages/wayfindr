@@ -1,0 +1,59 @@
+{
+  "retention": "720h0m0s",
+  "calls": [
+    {
+      "started_at": "2026-11-08T09:14:02Z",
+      "client": "claude-code",
+      "token_name": "default",
+      "connector": "linear",
+      "tool": "create_issue",
+      "duration_ms": 412,
+      "result": "ok"
+    },
+    {
+      "started_at": "2026-11-08T09:13:40Z",
+      "client": "claude-code",
+      "token_name": "default",
+      "connector": "linear",
+      "tool": "search_issues",
+      "duration_ms": 1234,
+      "result": "tool_error",
+      "error": "Unknown filter: state=opne"
+    },
+    {
+      "started_at": "2026-11-08T09:12:11Z",
+      "connector": "github",
+      "tool": "get_file",
+      "result": "rejected",
+      "kind": "invalid_arguments",
+      "case": "schema_mismatch",
+      "error": "The arguments do not match github.get_file's inputSchema. To fix: Fix the arguments and call again."
+    },
+    {
+      "started_at": "2026-11-08T08:55:02Z",
+      "client": "cursor",
+      "token_name": "nightly-triage",
+      "connector": "slack",
+      "tool": "post_message",
+      "duration_ms": 30000,
+      "result": "failed",
+      "kind": "timeout"
+    },
+    {
+      "started_at": "2026-11-08T08:54:02Z",
+      "connector": "",
+      "tool": "create_issue",
+      "result": "rejected",
+      "kind": "invalid_name",
+      "case": "unqualified"
+    },
+    {
+      "started_at": "2026-11-08T08:53:02Z",
+      "connector": "",
+      "tool": "",
+      "result": "rejected",
+      "kind": "invalid_name",
+      "case": "missing_name"
+    }
+  ]
+}
