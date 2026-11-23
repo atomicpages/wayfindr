@@ -67,26 +67,33 @@ const (
 	// spans lines.
 	CaseMultiline Case = "multiline"
 	// CaseChangesOthers (unsafe): the edit would change settings other than
-	// the one connector, or, for SetPublicURL, other than public_url.
+	// the one connector, or, for SetPublicURL and SetOAuthEnabled, other than
+	// public_url and server.oauth.enabled.
 	CaseChangesOthers Case = "changes_others"
 	// CaseServerNotTable (unsafe): SetPublicURL, and server is not written
 	// as a [server] table the edit can find (a dotted key or an inline
 	// table).
 	CaseServerNotTable Case = "server_not_table"
+	// CaseOAuthNotTable (unsafe): SetOAuthEnabled, and server or
+	// server.oauth is not written as a table the edit can find (a dotted
+	// key or an inline table).
+	CaseOAuthNotTable Case = "oauth_not_table"
 )
 
 // Error is a refused edit of the config file; the file is left as it was.
-// AppendConnector, RemoveConnector, EditConnector and SetPublicURL return it
-// as error.
+// AppendConnector, RemoveConnector, EditConnector, SetPublicURL and
+// SetOAuthEnabled return it as error.
 type Error struct {
 	Kind Kind
 	Case Case
-	// Connector is the connector the edit is about; empty for SetPublicURL.
+	// Connector is the connector the edit is about; empty for SetPublicURL
+	// and SetOAuthEnabled.
 	Connector string
 	// Key is the key of the connector's table the Case is about, as TOML
 	// writes it (auth.scopes), for CaseKeyNotSet, CaseKeyTwice,
 	// CaseDottedKeys and CaseMultiline. SetPublicURL's CaseMultiline names
-	// server.public_url.
+	// server.public_url. For CaseServerNotTable and CaseOAuthNotTable it is
+	// the table that is not written as one: server or server.oauth.
 	Key string
 	// Err is the parse error, for CaseUnparsable.
 	Err error
@@ -207,6 +214,13 @@ func explain(e *Error) (reason, action string, unsafe bool) {
 		return "the edit would change other settings", byHand, true
 	case CaseServerNotTable:
 		return "server is not written as a [server] table", byHand, true
+	case CaseOAuthNotTable:
+		// The editor names the culprit: server itself, or only server.oauth.
+		if e.Key == "server" {
+			return "server is not written as a [server] table", byHand, true
+		}
+
+		return "server.oauth is not written as a [server.oauth] table", byHand, true
 	}
 
 	return "", "", false

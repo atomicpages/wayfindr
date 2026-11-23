@@ -73,7 +73,7 @@ func TestCloudAgentsProgressAriaCurrent(t *testing.T) {
 func TestCloudAgentsSteps(t *testing.T) {
 	c, ck, _ := cloudConsole(t, &bytes.Buffer{})
 
-	t.Run("step 1 lists the agents, ChatGPT disabled", func(t *testing.T) {
+	t.Run("step 1 lists the agents, ChatGPT among them", func(t *testing.T) {
 		rec := c.get("/ui/cloud-agents", ck)
 		body := rec.Body.String()
 
@@ -81,18 +81,18 @@ func TestCloudAgentsSteps(t *testing.T) {
 			t.Fatalf("GET = %d, want 200", rec.Code)
 		}
 
-		wantAll(t, "step 1", body, "Step 1 of 6", "Grok Bot", "Muse", "Not yet: needs sign-in support",
-			`value="grok" required`, `value="muse" required`, `value="chatgpt" disabled`,
+		wantAll(t, "step 1", body, "Step 1 of 6", "Grok Bot", "Muse", "ChatGPT", "Signs in with OAuth. You approve it on this computer.",
+			`value="grok" required`, `value="muse" required`, `value="chatgpt" required`,
 			`href="/ui/cloud-agents"`, // the nav entry
 			"No cloud agents yet.")
 
-		if strings.Contains(body, `value="chatgpt" required`) {
-			t.Error("ChatGPT can be picked")
+		if strings.Contains(body, "Connect a client") {
+			t.Error("the Connect a client button shows while sign-in is off")
 		}
 	})
 
-	t.Run("a disabled or unknown agent starts over", func(t *testing.T) {
-		for _, agent := range []string{"chatgpt", "nobody"} {
+	t.Run("an unknown agent starts over", func(t *testing.T) {
+		for _, agent := range []string{"nobody"} {
 			body := c.get("/ui/cloud-agents?step=connectors&agent="+agent, ck).Body.String()
 
 			if !strings.Contains(body, "Step 1 of 6") {
@@ -191,7 +191,7 @@ func TestCloudAgentsPublicURL(t *testing.T) {
 
 	t.Run("an unknown agent starts over", func(t *testing.T) {
 		f := form("https://x.example")
-		f.Set("agent", "chatgpt")
+		f.Set("agent", "nobody")
 		rec := c.post("/ui/cloud-agents/url", ck, f)
 
 		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/ui/cloud-agents" {

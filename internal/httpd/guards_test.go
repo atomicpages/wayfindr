@@ -9,7 +9,8 @@ import (
 )
 
 // TestForeignOriginForbidden: a browser page from any non-loopback origin
-// gets 403 everywhere except the OAuth callback.
+// gets 403 everywhere except the OAuth callback and the authorization
+// server's routes, which have no Origin check (design §7.11).
 func TestForeignOriginForbidden(t *testing.T) {
 	h := newStubbedHandler(t)
 	origins := []string{
@@ -29,7 +30,7 @@ func TestForeignOriginForbidden(t *testing.T) {
 				req.Header.Set("Origin", origin)
 				code, body := serve(h, req)
 
-				if rt.anyHost {
+				if rt.anyHost || rt.public {
 					if code != http.StatusOK || body != rt.want {
 						t.Errorf("got %d %q, want 200 %q", code, body, rt.want)
 					}

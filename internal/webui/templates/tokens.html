@@ -4,7 +4,7 @@
     <h1>Client tokens</h1>
     <p>Give each client its own token, limited to the connectors it needs. Revoking one takes effect on its next
       request.</p>
-    <p>Connecting a cloud agent such as Grok Bot or Muse? Its token is made on the <a href="/ui/cloud-agents">Cloud agents</a>
+    <p>Connecting a cloud agent such as Grok Bot, Muse, or ChatGPT? Its token or sign-in is set up on the <a href="/ui/cloud-agents">Cloud agents</a>
       page.</p>
   </div>
 </div>
@@ -39,7 +39,7 @@
         </tr>
         {{range .Tokens}}
         <tr>
-          <td class="name">{{.Name}}{{if .Remote}} <span class="badge secondary" title="Can reach Wayfindr through a tunnel">remote</span>{{end}}</td>
+          <td class="name">{{.Name}}{{if .OAuth}} <span class="badge secondary" title="Signed in with OAuth">oauth{{with .ClientHost}} · {{.}}{{end}}</span>{{else if .Remote}} <span class="badge secondary" title="Can reach Wayfindr through a tunnel">remote</span>{{end}}</td>
           <td>
             <div class="chips">{{range .Connectors}}<span class="badge secondary">{{template "mini" (logo
                 .)}}{{.}}</span>{{end}}</div>

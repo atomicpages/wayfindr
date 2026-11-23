@@ -24,7 +24,7 @@ const (
 
 // ConfigCase is the finer reason within a [ConfigKind] (GLOSSARY: Case).
 // The set is closed. The cases of config's edits are mirrored here, and
-// the daemon translates each; the last four are the daemon's own.
+// the daemon translates each; the last five are the daemon's own.
 type ConfigCase string
 
 const (
@@ -66,6 +66,9 @@ const (
 	// ConfigCaseServerNotTable (unsafe): server is not written as a [server]
 	// table.
 	ConfigCaseServerNotTable ConfigCase = "server_not_table"
+	// ConfigCaseOAuthNotTable (unsafe): server or server.oauth is not
+	// written as a table the edit can find.
+	ConfigCaseOAuthNotTable ConfigCase = "oauth_not_table"
 
 	// ConfigCaseConfigChanged (conflict): the file changed between the read
 	// and the write.
@@ -79,13 +82,16 @@ const (
 	// ConfigCaseInvalidPublicURL (invalid): server.public_url is not a
 	// valid URL.
 	ConfigCaseInvalidPublicURL ConfigCase = "invalid_public_url"
+	// ConfigCaseInvalidOAuth (invalid): turning server.oauth on is refused
+	// by the config's rules (no public URL, no clients).
+	ConfigCaseInvalidOAuth ConfigCase = "invalid_oauth"
 )
 
 // ConfigError is a change to the daemon's config file that it refused, such
 // as a taken or invalid connector name or an invalid public URL: the Kind and
 // Case, and the advice, whose text is the response body. The HTTP status
 // follows from the Kind alone (see status). It is what Options.AddConnector
-// and Options.SetPublicURL return for a refusal.
+// Options.SetPublicURL and Options.SetOAuthEnabled return for a refusal.
 type ConfigError struct {
 	Kind   ConfigKind
 	Case   ConfigCase

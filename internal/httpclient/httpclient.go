@@ -5,6 +5,9 @@
 // table's CA file, and presents its client certificate to any server that
 // asks for one.
 //
+// It also builds PublicOnly's client, for URLs a stranger may name, which
+// connects only to public addresses (design §7.11).
+//
 // It is a leaf: it imports only the standard library and config.
 package httpclient
 

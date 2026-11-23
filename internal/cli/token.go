@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -106,7 +107,7 @@ func newTokenListCmd(host Host) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
-		Short:   "List the scoped client tokens, never their values",
+		Short:   "List the scoped client tokens and OAuth grants, never their values",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			res, err := tokenRequest(cmd.Context(), host, func(ctx context.Context, d *adminDaemon) (admin.TokenList, error) {
@@ -132,7 +133,7 @@ func newTokenListCmd(host Host) *cobra.Command {
 func newTokenRevokeCmd(host Host) *cobra.Command {
 	return &cobra.Command{
 		Use:   "revoke <name>",
-		Short: "Delete a scoped client token; clients using it are refused",
+		Short: "Delete a scoped client token or an OAuth grant; clients using it are refused",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			res, err := tokenRequest(cmd.Context(), host, func(ctx context.Context, d *adminDaemon) (admin.TokenRevoked, error) {
@@ -143,7 +144,7 @@ func newTokenRevokeCmd(host Host) *cobra.Command {
 				return err
 			}
 
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Revoked client token %s. Clients using it are refused from now on.\n", res.Name)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Revoked %s. Clients using it are refused from now on.\n", res.Name)
 
 			return err
 		},
@@ -162,8 +163,22 @@ func writeTokensJSON(w io.Writer, res admin.TokenList) error {
 	return err
 }
 
-// writeTokensTable prints one row per scoped token, by name, or says there
-// are none. Times are UTC.
+// tokenKind is the KIND column: "token", or "oauth (<client host>)" for an
+// OAuth grant, naming the client that holds it.
+func tokenKind(t admin.Token) string {
+	if t.Kind != admin.TokenKindOAuth {
+		return string(admin.TokenKindToken)
+	}
+
+	if u, err := url.Parse(t.Client); err == nil && u.Host != "" {
+		return fmt.Sprintf("%s (%s)", admin.TokenKindOAuth, u.Host)
+	}
+
+	return string(admin.TokenKindOAuth)
+}
+
+// writeTokensTable prints one row per scoped token or OAuth grant, by name,
+// or says there are none. Times are UTC.
 func writeTokensTable(w io.Writer, res admin.TokenList) error {
 	var b bytes.Buffer
 
@@ -171,7 +186,7 @@ func writeTokensTable(w io.Writer, res admin.TokenList) error {
 		b.WriteString("No scoped client tokens. Create one with `wayfindr token create <name> --connector <connector>`.\n")
 	} else {
 		tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-		rows := []string{"NAME\tCONNECTORS\tREMOTE\tCREATED\tLAST USED"}
+		rows := []string{"NAME\tKIND\tCONNECTORS\tREMOTE\tCREATED\tLAST USED"}
 
 		for _, t := range res.Tokens {
 			used := "-"
@@ -186,7 +201,7 @@ func writeTokensTable(w io.Writer, res admin.TokenList) error {
 				remote = "yes"
 			}
 
-			rows = append(rows, strings.Join([]string{t.Name, strings.Join(t.Connectors, ", "), remote, formatTime(t.CreatedAt), used}, "\t"))
+			rows = append(rows, strings.Join([]string{t.Name, tokenKind(t), strings.Join(t.Connectors, ", "), remote, formatTime(t.CreatedAt), used}, "\t"))
 		}
 
 		// A tabwriter over a bytes.Buffer cannot fail.

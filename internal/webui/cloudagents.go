@@ -1,11 +1,13 @@
 package webui
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/atomicpages/wayfindr/internal/admin"
 )
@@ -13,12 +15,14 @@ import (
 // The wizard's stages, in order (ADR 0021). The first four are pages of the
 // wizard proper; stageDone shows the new token, the connection test, and the
 // agent's setup text, because all three need the token's value, which only
-// that answer holds.
+// that answer holds. ChatGPT's path has no connectors or token stage: agent,
+// url, stageOAuth, then stageDone, which holds no secret (ADR 0022).
 const (
 	stageAgent      = "agent"
 	stageConnectors = "connectors"
 	stageURL        = "url"
 	stageToken      = "token"
+	stageOAuth      = "oauth"
 	stageDone       = "done"
 )
 
@@ -29,18 +33,48 @@ const cloudPath = "/ui/cloud-agents"
 const (
 	agentGrok = "grok"
 	agentMuse = "muse"
-	// agentChatGPT is listed but disabled: it takes no Authorization header.
+	// agentChatGPT signs in with OAuth instead of a token: its custom
+	// connector form takes no Authorization header (ADR 0022). The wizard
+	// reads that from agentInfo.OAuth, not from this id.
 	agentChatGPT = "chatgpt"
 )
 
 // agentInfo is one agent the wizard lists.
 type agentInfo struct {
 	ID, Name string
-	// Blurb is the one line under the name; Disabled agents say why in it.
+	// Blurb is the one line under the name; a Disabled agent says why in it.
 	Blurb    string
 	Disabled bool
 	// DefaultName is the token's default name.
 	DefaultName string
+	// OAuth is set for an agent that signs in with OAuth instead of using a
+	// token (ADR 0022): it has no connectors or token stage, and its done
+	// stage holds no secret.
+	OAuth bool
+}
+
+// flowStage places one of a path's stages on the progress list.
+type flowStage struct {
+	Stage string
+	// Step is the stage's step number, one of the step constants.
+	Step int
+}
+
+// path is the stages an agent's wizard goes through, with the step each is
+// on, and the progress list's names, in step order. The token path's done
+// stage is on stepTest and its page covers stepSetUp too.
+func (a agentInfo) path() (stages []flowStage, names []string) {
+	if a.OAuth {
+		return []flowStage{
+				{stageAgent, oauthStepAgent}, {stageURL, oauthStepURL}, {stageOAuth, oauthStepSignIn}, {stageDone, oauthStepConnect},
+			},
+			[]string{"Agent", "Public URL", "Sign-in", "Connect"}
+	}
+
+	return []flowStage{
+			{stageAgent, stepAgent}, {stageConnectors, stepConnectors}, {stageURL, stepPublicURL}, {stageToken, stepToken}, {stageDone, stepTest},
+		},
+		[]string{"Agent", "Connectors", "Public URL", "Token", "Test", "Set up"}
 }
 
 // agents lists every agent in the order shown.
@@ -48,7 +82,7 @@ func agents() []agentInfo {
 	return []agentInfo{
 		{ID: agentGrok, Name: "Grok Bot", Blurb: "Adds Wayfindr as a custom connector with a header.", DefaultName: "grok-bot"},
 		{ID: agentMuse, Name: "Muse", Blurb: "You ask Muse in chat to add Wayfindr as a custom connector.", DefaultName: "muse"},
-		{ID: agentChatGPT, Name: "ChatGPT", Blurb: "Not yet: needs sign-in support.", Disabled: true},
+		{ID: agentChatGPT, Name: "ChatGPT", Blurb: "Signs in with OAuth. You approve it on this computer.", OAuth: true},
 	}
 }
 
@@ -67,6 +101,9 @@ func agentByID(id string) (agentInfo, bool) {
 type agentRow struct {
 	agentInfo
 	Checked bool
+	// Connect offers ChatGPT's "Connect a client" button on its row: sign-in
+	// is on, so connecting again needs no trip through the wizard.
+	Connect bool
 }
 
 // stepRow is one entry of the progress list: State is done, current, or todo.
@@ -131,6 +168,18 @@ type cloudView struct {
 	Test  *testView
 	Setup setupView
 
+	// StepN and StepTotal number the stage in its path ("Step 2 of 4"); the
+	// wizard's own headings state theirs.
+	StepN, StepTotal int
+	// Notice is a confirmation shown above the stage.
+	Notice string
+	// ConnectOffer is whether ChatGPT's row on the first step has its
+	// "Connect a client" button.
+	ConnectOffer bool
+	// ArmedUntil, when set, is when ChatGPT's connection arm ends, worded
+	// for the page.
+	ArmedUntil string
+
 	Remote []tokenRow
 	// RemoteUnavailable is set when the token list could not be read on the
 	// done stage: the page shows a note in place of the list rather than
@@ -138,7 +187,7 @@ type cloudView struct {
 	RemoteUnavailable bool
 }
 
-// The wizard's steps, numbered as the progress list shows them.
+// The token path's steps, numbered as the progress list shows them.
 const (
 	stepAgent = iota + 1
 	stepConnectors
@@ -148,28 +197,26 @@ const (
 	stepSetUp
 )
 
-// stepNames are the wizard's six steps, in step order.
-func stepNames() []string {
-	return []string{"Agent", "Connectors", "Public URL", "Token", "Test", "Set up"}
-}
+// The OAuth path's steps.
+const (
+	oauthStepAgent = iota + 1
+	oauthStepURL
+	oauthStepSignIn
+	oauthStepConnect
+)
 
-// stageStep is the step number a stage is on. The done stage is on stepTest,
-// and its page covers stepSetUp too.
-func stageStep(stage string) int {
-	switch stage {
-	case stageAgent:
-		return stepAgent
-	case stageConnectors:
-		return stepConnectors
-	case stageURL:
-		return stepPublicURL
-	case stageToken:
-		return stepToken
-	case stageDone:
-		return stepTest
-	default:
-		return stepAgent
+// stageStep is the step number a stage is on in agent's path; a stage the
+// path lacks is on the first step.
+func stageStep(stage string, agent agentInfo) int {
+	stages, _ := agent.path()
+
+	for _, fs := range stages {
+		if fs.Stage == stage {
+			return fs.Step
+		}
 	}
+
+	return stepAgent
 }
 
 // flowQuery is the wizard's place in a URL: the agent and connectors, never a
@@ -204,6 +251,12 @@ func (c *console) cloudAgents(w http.ResponseWriter, r *http.Request, s sess) {
 	if step == "" || step == stageAgent {
 		body.Stage = stageAgent
 		c.renderCloud(w, r, s, body, http.StatusOK)
+
+		return
+	}
+
+	if agent.OAuth {
+		c.cloudChatGPT(w, r, s, body, step)
 
 		return
 	}
@@ -321,13 +374,19 @@ func (c *console) renderCloud(w http.ResponseWriter, r *http.Request, s sess, bo
 		body.Connectors = append(body.Connectors, cn.Name)
 	}
 
-	for _, a := range agents() {
-		body.Agents = append(body.Agents, agentRow{agentInfo: a, Checked: a.ID == body.Agent.ID})
+	if body.Stage == stageAgent {
+		body.ConnectOffer = c.oauthOn(r)
 	}
 
-	cur := stageStep(body.Stage)
+	for _, a := range agents() {
+		body.Agents = append(body.Agents, agentRow{agentInfo: a, Checked: a.ID == body.Agent.ID, Connect: a.OAuth && body.ConnectOffer})
+	}
 
-	for i, n := range stepNames() {
+	cur := stageStep(body.Stage, body.Agent)
+	_, names := body.Agent.path()
+	body.StepN, body.StepTotal = cur, len(names)
+
+	for i, n := range names {
 		num := i + 1
 		state := "todo"
 
@@ -336,7 +395,7 @@ func (c *console) renderCloud(w http.ResponseWriter, r *http.Request, s sess, bo
 			state = "done"
 		case num == cur:
 			state = "current"
-		case num == stepSetUp && body.Stage == stageDone:
+		case body.Stage == stageDone && num > cur:
 			// The answer to the token form covers both Test and Set up.
 			state = "current"
 		}
@@ -344,13 +403,15 @@ func (c *console) renderCloud(w http.ResponseWriter, r *http.Request, s sess, bo
 		body.Steps = append(body.Steps, stepRow{N: num, Name: n, State: state, Aria: num == cur})
 	}
 
-	switch body.Stage {
-	case stageConnectors:
+	switch {
+	case body.Stage == stageConnectors, body.Stage == stageURL && body.Agent.OAuth:
 		body.BackHref = cloudPath
-	case stageURL:
+	case body.Stage == stageURL:
 		body.BackHref = flowQuery(stageConnectors, body.Agent.ID, body.PickedList)
-	case stageToken:
+	case body.Stage == stageToken:
 		body.BackHref = flowQuery(stageURL, body.Agent.ID, body.PickedList)
+	case body.Stage == stageOAuth:
+		body.BackHref = flowQuery(stageURL, body.Agent.ID, nil)
 	}
 
 	v.Toast = toast(r)
@@ -428,6 +489,13 @@ func (c *console) savePublicURL(w http.ResponseWriter, r *http.Request, s sess) 
 		}
 	}
 
+	// An OAuth agent has no token: its next step turns sign-in on.
+	if agent.OAuth {
+		http.Redirect(w, r, flowQuery(stageOAuth, agent.ID, nil), http.StatusSeeOther)
+
+		return
+	}
+
 	http.Redirect(w, r, flowQuery(stageToken, agent.ID, picked), http.StatusSeeOther)
 }
 
@@ -476,6 +544,13 @@ func (c *console) testCloudToken(w http.ResponseWriter, r *http.Request, s sess)
 
 	name, token := r.PostForm.Get("name"), r.PostForm.Get("token")
 
+	// An OAuth agent has no token: it tests Wayfindr's sign-in instead.
+	if token == "" && agent.OAuth {
+		c.testCloudOAuth(w, r, s)
+
+		return
+	}
+
 	if token == "" {
 		c.fail(w, r, s, http.StatusBadRequest, "There is no token to test. Create a token first.")
 
@@ -491,22 +566,39 @@ func (c *console) testCloudToken(w http.ResponseWriter, r *http.Request, s sess)
 		return
 	}
 
-	c.renderDone(w, r, s, doneView{Agent: agent, Name: name, Token: token, Test: testOutcome(res)}, http.StatusOK)
+	c.renderDone(w, r, s, doneView{Agent: agent, Name: name, Token: token, Test: testOutcome(res, false)}, http.StatusOK)
 }
 
 // testOutcome words a test's result. It branches on the closed outcome, and
-// the daemon's own message and action are the text.
-func testOutcome(res admin.RemoteTestResult) *testView {
+// the daemon's own message and action are the text. oauth is whether it was
+// the sign-in test (ChatGPT), which has no token and lists no tools.
+func testOutcome(res admin.RemoteTestResult, oauth bool) *testView {
 	tv := &testView{Class: "err", Title: "The test failed", Message: res.Message, Action: res.Action, URL: res.URL}
 
 	switch res.Outcome {
 	case admin.RemoteOK:
+		tv.Class, tv.Title = "ok", "The connection works"
+
+		if oauth {
+			tv.Detail = "Wayfindr's sign-in information is reachable through your public URL. Next, select Connect a client, " +
+				"add the connector in ChatGPT, and approve it here."
+
+			break
+		}
+
 		// The daemon's message already says how many connectors the token
 		// can use; the detail adds only what came back through the tunnel.
-		tv.Class, tv.Title = "ok", "The connection works"
 		tv.Detail = fmt.Sprintf("Listed %s through your public URL.", countOf(res.Tools, "tool"))
 	case admin.RemoteProxyTreatsRemoteAsLocal:
 		tv.Title, tv.Prominent = "Warning: your tunnel makes outside requests look local", true
+	case admin.RemoteOAuthOff:
+		tv.Title = "Sign-in is off"
+	case admin.RemoteMetadataMissing:
+		tv.Title = "Wayfindr's sign-in information is not there"
+	case admin.RemoteMetadataMismatch:
+		tv.Title = "The sign-in information names another address"
+	case admin.RemoteTokenInvalid:
+		tv.Title = "Wayfindr does not accept this token"
 	case admin.RemoteNotConfigured, admin.RemoteUnreachable, admin.RemoteTLSError, admin.RemoteTimeout, admin.RemoteInterstitial,
 		admin.RemoteRedirect, admin.RemoteNotFound, admin.RemoteTokenRefused, admin.RemoteUnexpected:
 	}
@@ -551,4 +643,195 @@ func setupFor(publicURL, token string) setupView {
 		"Ask me for the key through your secure credential prompt. I will not type it into this chat."
 
 	return sv
+}
+
+// oauthOn reports whether Wayfindr's sign-in (server.oauth) is on. A failed
+// read counts as off: it only decides whether a convenience button shows.
+func (c *console) oauthOn(r *http.Request) bool {
+	set, err := c.Admin.OAuthSettings(r.Context())
+
+	if err != nil {
+		c.Logger.Error().Err(err).Msg("read oauth settings for cloud agents page")
+
+		return false
+	}
+
+	return set.Enabled
+}
+
+// chatGPT is the wizard's entry for ChatGPT.
+func chatGPT() agentInfo {
+	a, _ := agentByID(agentChatGPT)
+
+	return a
+}
+
+// cloudChatGPT serves GET /ui/cloud-agents?step=&agent=chatgpt past the first
+// step. ChatGPT has no connectors step: the approve page picks them. The
+// stage comes from the query, which holds no secret, and is checked against
+// what is set: no public URL is the url stage, and sign-in off is the oauth
+// stage, wherever the query points.
+func (c *console) cloudChatGPT(w http.ResponseWriter, r *http.Request, s sess, body cloudView, step string) {
+	pu, err := c.Admin.PublicURL(r.Context())
+
+	if err != nil {
+		c.failErr(w, r, s, err)
+
+		return
+	}
+
+	body.Stage = stageURL
+	body.PublicURL = pu.URL
+
+	if step != stageOAuth && step != stageDone {
+		c.renderCloud(w, r, s, body, http.StatusOK)
+
+		return
+	}
+
+	if pu.URL == "" {
+		body.Error = "Set your public URL first."
+		c.renderCloud(w, r, s, body, http.StatusOK)
+
+		return
+	}
+
+	set, err := c.Admin.OAuthSettings(r.Context())
+
+	if err != nil {
+		c.failErr(w, r, s, err)
+
+		return
+	}
+
+	if !set.Enabled {
+		body.Stage = stageOAuth
+		c.renderCloud(w, r, s, body, http.StatusOK)
+
+		return
+	}
+
+	c.renderChatGPTDone(w, r, s, chatGPTDone{}, http.StatusOK)
+}
+
+// chatGPTDone is what ChatGPT's last stage shows: the connection test run on
+// it, if any, when the arm ends, if it was just armed, and why the last
+// action was refused.
+type chatGPTDone struct {
+	Test       *testView
+	ArmedUntil time.Time
+	Error      string
+}
+
+// renderChatGPTDone shows the form values for ChatGPT, the "Connect a
+// client" button, the test, and the way to turn sign-in off. It holds no
+// secret, so it is a page a reload can show again.
+func (c *console) renderChatGPTDone(w http.ResponseWriter, r *http.Request, s sess, d chatGPTDone, status int) {
+	body := cloudView{Stage: stageDone, Agent: chatGPT(), Test: d.Test, Error: d.Error}
+	pu, err := c.Admin.PublicURL(r.Context())
+
+	if err != nil {
+		c.Logger.Error().Err(err).Msg("read public url for chatgpt setup")
+	}
+
+	body.Setup = setupFor(pu.URL, "")
+
+	if !d.ArmedUntil.IsZero() {
+		body.ArmedUntil = clock(c.Now(), d.ArmedUntil)
+	}
+
+	c.renderCloud(w, r, s, body, status)
+}
+
+// setCloudOAuth serves POST /ui/cloud-agents/oauth: it turns Wayfindr's
+// sign-in on or off. Turning it on also arms a connection, so the user can
+// add the connector in ChatGPT at once. Both render, never redirect, and the
+// address stays on the stage's own URL.
+func (c *console) setCloudOAuth(w http.ResponseWriter, r *http.Request, s sess) {
+	keepAddress(w)
+
+	agent, _, ok := formFlow(r)
+
+	if !ok || !agent.OAuth {
+		http.Redirect(w, r, cloudPath, http.StatusSeeOther)
+
+		return
+	}
+
+	enabled := r.PostForm.Get("enabled")
+
+	if enabled != "true" && enabled != "false" {
+		c.fail(w, r, s, http.StatusBadRequest, "Choose whether to turn sign-in on or off.")
+
+		return
+	}
+
+	on := enabled == "true"
+
+	if _, err := c.Admin.SetOAuthEnabled(r.Context(), on); err != nil {
+		status, msg := c.message(r, err)
+		c.renderCloud(w, r, s, cloudView{Stage: stageOAuth, Agent: agent, Error: msg}, status)
+
+		return
+	}
+
+	if !on {
+		c.renderCloud(w, r, s, cloudView{Stage: stageOAuth, Agent: agent, Notice: "Sign-in is off. ChatGPT is refused until you turn it on again."}, http.StatusOK)
+
+		return
+	}
+
+	c.armAndRender(w, r, s)
+}
+
+// armCloudOAuth serves POST /ui/cloud-agents/arm: "Connect a client".
+func (c *console) armCloudOAuth(w http.ResponseWriter, r *http.Request, s sess) {
+	keepAddress(w)
+
+	agent, _, ok := formFlow(r)
+
+	if !ok || !agent.OAuth {
+		http.Redirect(w, r, cloudPath, http.StatusSeeOther)
+
+		return
+	}
+
+	c.armAndRender(w, r, s)
+}
+
+// armAndRender arms the authorization server and shows ChatGPT's last stage
+// with when the arm ends. Sign-in off (409) shows the stage that turns it on,
+// with the daemon's message.
+func (c *console) armAndRender(w http.ResponseWriter, r *http.Request, s sess) {
+	arm, err := c.Admin.ArmOAuth(r.Context())
+
+	if ae := (*admin.APIError)(nil); errors.As(err, &ae) && ae.Status == http.StatusConflict {
+		c.renderCloud(w, r, s, cloudView{Stage: stageOAuth, Agent: chatGPT(), Error: ae.Error()}, http.StatusConflict)
+
+		return
+	}
+
+	if err != nil {
+		status, msg := c.message(r, err)
+		c.renderChatGPTDone(w, r, s, chatGPTDone{Error: msg}, status)
+
+		return
+	}
+
+	c.renderChatGPTDone(w, r, s, chatGPTDone{ArmedUntil: arm.ExpiresAt}, http.StatusOK)
+}
+
+// testCloudOAuth tests ChatGPT's path: the sign-in information through the
+// public URL, with no token.
+func (c *console) testCloudOAuth(w http.ResponseWriter, r *http.Request, s sess) {
+	res, err := c.Admin.TestRemoteOAuth(r.Context())
+
+	if err != nil {
+		status, msg := c.message(r, err)
+		c.renderChatGPTDone(w, r, s, chatGPTDone{Test: &testView{Class: "err", Title: "The test could not run", Message: msg}}, status)
+
+		return
+	}
+
+	c.renderChatGPTDone(w, r, s, chatGPTDone{Test: testOutcome(res, true)}, http.StatusOK)
 }

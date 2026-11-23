@@ -53,7 +53,8 @@ about 2 seconds.
 | Change                                  | Takes effect                                                                                                                                                                                     |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `[server] listen`, `[storage]`          | On restart. The daemon logs `config change takes effect on restart` with the key.                                                                                                                |
-| `[server] public_url`                   | At once. Nothing else depends on it.                                                                                                                                                             |
+| `[server] public_url`                   | At once. Nothing else depends on it, unless `[server.oauth]` is on.                                                                                                                              |
+| `[server.oauth]`                        | At once.                                                                                                                                                                                         |
 | `[embedding]` added, removed, or edited | At once. The daemon swaps the embedding client and re-embeds the catalog as needed.                                                                                                              |
 | `[index]`                               | At once. Every HTTP connector is rescheduled.                                                                                                                                                    |
 | `[calls]`                               | At once. A new `retention` applies to calls made from then on, and to pruning from the next hourly prune.                                                                                        |
@@ -121,18 +122,58 @@ public_url = "https://wayfindr.example.com"
 - It must be an absolute `https` URL. The path may be empty or `/`; it can't
   have a query string, a fragment, or a username or password. Anything else is
   rejected, for example `server.public_url: must not have a query string`.
-- It is informational only. Wayfindr never compares a request against it: no
-  request is let in or kept out because of it. What lets a request through a
-  tunnel is a [remote client token](./cli#wayfindr-token-create).
+- It is informational only, unless you turn on
+  [`[server.oauth]`](#server-oauth), which uses it as its issuer. Wayfindr never
+  compares a request against it: no request is let in or kept out because of
+  it. What lets a request through a tunnel is a
+  [remote client token](./cli#wayfindr-token-create) (or, with `[server.oauth]`
+  on, an OAuth grant).
 - The [web console](../guide/console#connecting-a-cloud-agent) uses it for the
   text you paste into a cloud agent, and to test the connection.
 - A reload applies it at once; it needs no restart.
 - Set it by hand, in the console's Cloud agents page, or through the admin API
   ([`PUT /admin/server/public-url`](./http#admin)), which keeps the rest of the
-  file as it was.
+  file as it was. Clearing it is refused while `server.oauth.enabled` is true.
 
 See [Cloud agents](../guide/cloud-agents) for how to set up the tunnel and the
 agent.
+
+## `[server.oauth]`
+
+Wayfindr's own OAuth sign-in for cloud agents that can't send a header, such as
+ChatGPT. It is off unless you turn it on.
+
+| Key       | Type             | Default                                     |
+| --------- | ---------------- | ------------------------------------------- |
+| `enabled` | boolean          | `false`                                     |
+| `clients` | array of strings | `["https://chatgpt.com/oauth/client.json"]` |
+
+```toml
+[server]
+public_url = "https://wayfindr.example.com"
+
+[server.oauth]
+enabled = true
+clients = ["https://chatgpt.com/oauth/client.json"]
+```
+
+- `enabled` needs `[server] public_url`, which becomes the issuer, written
+  with a lower-case scheme and host, no `:443`, and no trailing slash. Otherwise the config is rejected:
+  `server.oauth.enabled: needs server.public_url`.
+- `clients` are the client IDs allowed to sign in, matched exactly. Leave it out
+  for ChatGPT's. An explicit `clients = []` allows none, which is rejected while
+  `enabled` is true.
+- Each client ID must be an absolute `https` URL with a host and a path (not just
+  `/`), and no username or password, query string, or fragment. It must be in
+  canonical form: a lowercase scheme and host, and no `.` or `..` path segment.
+  Entries are checked even while `enabled` is false, and a repeat is rejected.
+  The error names the entry by position, for example
+  `server.oauth.clients: entry 2 must have a path: a client ID is the URL of its metadata document`,
+  never its value.
+- A reload applies a change at once; it needs no restart.
+- Turn it on or off by hand, or through the admin API (`PUT /admin/server/oauth`,
+  body `{"enabled": true}`; see the [admin API](./http#admin)), which writes only
+  the `enabled` line.
 
 ## `[storage]`
 

@@ -9,6 +9,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/atomicpages/wayfindr/internal/admin"
+	"github.com/atomicpages/wayfindr/internal/config"
 )
 
 // TestDescribeRemote: every outcome gets a message, a failure gets an action,
@@ -33,11 +34,16 @@ func TestDescribeRemote(t *testing.T) {
 		{"timeout", admin.RemoteTimeout, admin.RemoteDetailNone, []string{"x.example.com"}},
 		{"interstitial", admin.RemoteInterstitial, admin.RemoteDetailNone, []string{"x.example.com", "web page"}},
 		{"redirect", admin.RemoteRedirect, admin.RemoteDetailNone, []string{"x.example.com", "login.example.com"}},
-		{"not found", admin.RemoteNotFound, admin.RemoteDetailNone, []string{"x.example.com", "404", "not a remote token", "wrong", "revoked"}},
-		{"token refused", admin.RemoteTokenRefused, admin.RemoteDetailNone, []string{"x.example.com", "HTTP 418", "login or access check"}},
+		{"not found", admin.RemoteNotFound, admin.RemoteDetailNone, []string{"x.example.com", "404", "not a remote token", "wrong", "revoked", "sign-in on", "did not reach Wayfindr's /mcp"}},
+		{"token refused", admin.RemoteTokenRefused, admin.RemoteDetailNone, []string{"x.example.com", "HTTP 418", "not with Wayfindr's own answer", "login or access check"}},
 		{"proxy treats remote as local", admin.RemoteProxyTreatsRemoteAsLocal, admin.RemoteDetailNone, []string{"Not safe", "x.example.com", "default client token"}},
 		{"unexpected status", admin.RemoteUnexpected, admin.RemoteDetailNone, []string{"x.example.com", "HTTP 418"}},
 		{"unexpected, not MCP", admin.RemoteUnexpected, admin.RemoteDetailNotMCP, []string{"x.example.com", "not like Wayfindr's MCP endpoint"}},
+		{"token invalid", admin.RemoteTokenInvalid, admin.RemoteDetailNone, []string{"x.example.com", "401", "not a remote token", "revoked"}},
+		{"oauth off", admin.RemoteOAuthOff, admin.RemoteDetailNone, []string{"OAuth is off", "nothing to test"}},
+		{"metadata missing", admin.RemoteMetadataMissing, admin.RemoteDetailNone, []string{"x.example.com", "(HTTP 418)", "sign-in information"}},
+		{"metadata mismatch", admin.RemoteMetadataMismatch, admin.RemoteDetailNone, []string{"x.example.com", "another address than the public URL"}},
+		{"ok for the OAuth test", admin.RemoteOK, admin.RemoteDetailOAuth, []string{"https://x.example.com/mcp", "sign-in", "no token"}},
 		{"unexpected, tokenless status", admin.RemoteUnexpected, admin.RemoteDetailBareStatus, []string{"The token works", "HTTP 418", "x.example.com"}},
 	}
 
@@ -72,6 +78,20 @@ func TestDescribeRemote(t *testing.T) {
 
 		if got.URL != "" || got.Status != 0 {
 			t.Errorf("result = %+v, want no url and no status", got)
+		}
+	})
+
+	t.Run("oauth_off and the OAuth ok report no connectors or tools, and oauth_off no address", func(t *testing.T) {
+		off := admin.DescribeRemote(admin.RemoteOAuthOff, facts)
+
+		if off.URL != "" || off.Status != 0 {
+			t.Errorf("oauth_off = %+v, want no url and no status", off)
+		}
+
+		ok := admin.DescribeRemote(admin.RemoteOK, admin.RemoteFacts{URL: "https://x.example.com/mcp", Detail: admin.RemoteDetailOAuth})
+
+		if !ok.OK || ok.Connectors != 0 || ok.Tools != 0 || strings.Contains(ok.Message, "connector") {
+			t.Errorf("OAuth ok = %+v", ok)
 		}
 	})
 
@@ -183,7 +203,7 @@ func TestTestRemote(t *testing.T) {
 		}
 		_, srv := serve(t, opts)
 
-		for _, body := range []string{``, `{}`, `{"token":""}`, `{"token":7}`, `{"token":"x","extra":1}`, `"x"`, `{"token":"x"}{}`} {
+		for _, body := range []string{``, `{}`, `{"token":""}`, `{"token":7}`, `{"token":"x","extra":1}`, `"x"`, `{"token":"x"}{}`, `{"token":"x","oauth":true}`, `{"oauth":false}`, `{"oauth":"yes"}`, `{"token":"","oauth":false}`} {
 			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/admin/remote/test", strings.NewReader(body))
 			res, err := srv.Client().Do(req)
 
@@ -219,6 +239,86 @@ func TestTestRemote(t *testing.T) {
 
 		if res.StatusCode != http.StatusRequestEntityTooLarge {
 			t.Errorf("status %d, want 413", res.StatusCode)
+		}
+	})
+}
+
+func TestTestRemoteOAuth(t *testing.T) {
+	st, user := newStore(t)
+
+	on := admin.ConfigState{PublicURL: "https://wayfindr.example.com", OAuth: config.OAuth{Enabled: true}}
+
+	t.Run("hands the public URL and no token to the daemon and answers its result", func(t *testing.T) {
+		opts := options(t, st, user, &fakeUpstreams{}, on)
+
+		var gotURL, gotToken string
+
+		calls := 0
+		opts.TestRemote = func(_ context.Context, publicURL, token string) admin.RemoteTestResult {
+			calls++
+			gotURL, gotToken = publicURL, token
+
+			return admin.RemoteTestResult{Outcome: admin.RemoteMetadataMismatch, OK: true, Message: "Names another address.", URL: publicURL + "/mcp"}
+		}
+
+		c, _ := serve(t, opts)
+		got, err := c.TestRemoteOAuth(context.Background())
+
+		if err != nil {
+			t.Fatalf("TestRemoteOAuth: %v", err)
+		}
+
+		want := admin.RemoteTestResult{Outcome: admin.RemoteMetadataMismatch, Message: "Names another address.", URL: "https://wayfindr.example.com/mcp"}
+
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Errorf("result (-want +got):\n%s", diff)
+		}
+
+		if calls != 1 || gotURL != "https://wayfindr.example.com" || gotToken != "" {
+			t.Errorf("daemon called %d times with url %q, token %q; want once, the public URL, no token", calls, gotURL, gotToken)
+		}
+	})
+
+	t.Run("with OAuth off the answer is oauth_off and nothing is sent", func(t *testing.T) {
+		opts := options(t, st, user, &fakeUpstreams{}, admin.ConfigState{PublicURL: "https://wayfindr.example.com"})
+		opts.TestRemote = func(context.Context, string, string) admin.RemoteTestResult {
+			t.Error("TestRemote called while OAuth is off")
+
+			return admin.RemoteTestResult{}
+		}
+
+		c, _ := serve(t, opts)
+		got, err := c.TestRemoteOAuth(context.Background())
+
+		if err != nil {
+			t.Fatalf("TestRemoteOAuth: %v", err)
+		}
+
+		if got.Outcome != admin.RemoteOAuthOff || got.OK || got.Message == "" || got.Action == "" || got.URL != "" {
+			t.Errorf("result = %+v, want oauth_off with a message and an action", got)
+		}
+	})
+
+	t.Run("a token test is not affected by OAuth being off", func(t *testing.T) {
+		opts := options(t, st, user, &fakeUpstreams{}, admin.ConfigState{PublicURL: "https://wayfindr.example.com"})
+		opts.TestRemote = func(_ context.Context, _, token string) admin.RemoteTestResult {
+			return admin.RemoteTestResult{Outcome: admin.RemoteOK, Message: token}
+		}
+
+		c, _ := serve(t, opts)
+		got, err := c.TestRemote(context.Background(), "wf_s_secret")
+
+		if err != nil || got.Outcome != admin.RemoteOK {
+			t.Errorf("TestRemote = %+v, %v; want ok", got, err)
+		}
+	})
+
+	t.Run("not wired is 501", func(t *testing.T) {
+		c, _ := serve(t, options(t, st, user, &fakeUpstreams{}, on))
+		_, err := c.TestRemoteOAuth(context.Background())
+
+		if got := statusOf(err); got != http.StatusNotImplemented {
+			t.Errorf("status = %d (%v), want 501", got, err)
 		}
 	})
 }

@@ -53,6 +53,15 @@ type Admin interface {
 	PublicURL(ctx context.Context) (admin.PublicURL, error)
 	SetPublicURL(ctx context.Context, publicURL string) (admin.PublicURL, error)
 	TestRemote(ctx context.Context, token string) (admin.RemoteTestResult, error)
+	// The authorization server's side (ADR 0022): sign-in on and off, the
+	// connection test without a token, and the pending authorizations.
+	OAuthSettings(ctx context.Context) (admin.OAuthSettings, error)
+	SetOAuthEnabled(ctx context.Context, enabled bool) (admin.OAuthSettings, error)
+	TestRemoteOAuth(ctx context.Context) (admin.RemoteTestResult, error)
+	ArmOAuth(ctx context.Context) (admin.OAuthArm, error)
+	OAuthRequest(ctx context.Context, id string) (admin.OAuthRequest, error)
+	ApproveOAuth(ctx context.Context, id string, a admin.OAuthApproval) (admin.OAuthDecision, error)
+	DenyOAuth(ctx context.Context, id string) (admin.OAuthDecision, error)
 }
 
 // Options is what New needs. The daemon builds it once.
@@ -138,6 +147,18 @@ func New(opts Options) (http.Handler, error) {
 	mux.HandleFunc("GET /ui/cloud-agents/url", c.authed(c.backToWizard))
 	mux.HandleFunc("GET /ui/cloud-agents/token", c.authed(c.backToWizard))
 	mux.HandleFunc("GET /ui/cloud-agents/test", c.authed(c.backToWizard))
+	// ChatGPT's path signs in with OAuth instead of a token (ADR 0022).
+	mux.HandleFunc("POST /ui/cloud-agents/oauth", c.authedForm(c.setCloudOAuth))
+	mux.HandleFunc("POST /ui/cloud-agents/arm", c.authedForm(c.armCloudOAuth))
+	mux.HandleFunc("GET /ui/cloud-agents/oauth", c.authed(c.backToWizard))
+	mux.HandleFunc("GET /ui/cloud-agents/arm", c.authed(c.backToWizard))
+	// The approve page of Wayfindr's authorization server. Its GET checks
+	// the session itself: the browser arrives from another site, without
+	// the cookie, and must not be sent to the login page.
+	mux.HandleFunc("GET "+ApprovePath, c.approvePage)
+	mux.HandleFunc("POST "+ApprovePath, c.authedForm(c.approve))
+	mux.HandleFunc("POST "+DenyPath, c.authedForm(c.deny))
+	mux.HandleFunc("GET "+DenyPath, c.authed(c.backToConnectors))
 	mux.HandleFunc("/ui/", c.notFound)
 
 	return securityHeaders(mux), nil
@@ -146,7 +167,7 @@ func New(opts Options) (http.Handler, error) {
 // parsePages parses each page with the shared layout into its own set, so
 // every page can define "title" and "content".
 func parsePages(brands brandIndex) (map[string]*template.Template, error) {
-	funcs := template.FuncMap{"code": codeSpans, "icon": icon, "logo": brands.logo, "revoke": revokeFor}
+	funcs := template.FuncMap{"code": codeSpans, "icon": icon, "logo": brands.logo, "revoke": revokeFor, "picker": pickerFor}
 	layout, err := template.New("layout").Funcs(funcs).ParseFS(templateFiles, "templates/layout.html")
 
 	if err != nil {
@@ -155,7 +176,7 @@ func parsePages(brands brandIndex) (map[string]*template.Template, error) {
 
 	pages := map[string]*template.Template{}
 
-	for _, name := range []string{"connectors", "connector", "calls", "search", "tokens", "cloudagents", "error", "add", "review", "device"} {
+	for _, name := range []string{"connectors", "connector", "calls", "search", "tokens", "cloudagents", "error", "add", "review", "device", "approve"} {
 		t, err := template.Must(layout.Clone()).ParseFS(templateFiles, "templates/"+name+".html")
 
 		if err != nil {
@@ -172,6 +193,16 @@ func parsePages(brands brandIndex) (map[string]*template.Template, error) {
 	}
 
 	pages["login"] = login
+
+	// The approve page's stand-in for a browser without a session is
+	// standalone like the login page: no sidebar, so no call to the admin API.
+	cont, err := template.New("continue").Funcs(funcs).ParseFS(templateFiles, "templates/continue.html")
+
+	if err != nil {
+		return nil, err
+	}
+
+	pages["continue"] = cont
 
 	return pages, nil
 }
@@ -367,8 +398,8 @@ func (c *console) render(w http.ResponseWriter, status int, page string, data an
 	t := c.pages[page]
 	name := "layout"
 
-	if page == "login" {
-		name = "login"
+	if page == "login" || page == "continue" {
+		name = page
 	}
 
 	if err := t.ExecuteTemplate(&b, name, data); err != nil {

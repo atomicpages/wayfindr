@@ -56,6 +56,8 @@ type ConfigState struct {
 	// PublicURL is the running config's server.public_url; empty when none
 	// is set (ADR 0021).
 	PublicURL string
+	// OAuth is the running config's server.oauth (ADR 0022).
+	OAuth config.OAuth
 }
 
 // Options is what New needs. The daemon builds it once.
@@ -113,8 +115,18 @@ type Options struct {
 	// removing it for "", and applies it (ADR 0021). A refusal is a
 	// *ConfigError. Nil answers PUT /admin/server/public-url with 501.
 	SetPublicURL func(ctx context.Context, publicURL string) error
+	// SetOAuthEnabled writes server.oauth.enabled to the daemon's config
+	// file and applies it (ADR 0022). A refusal is a *ConfigError. Nil
+	// answers PUT /admin/server/oauth with 501.
+	SetOAuthEnabled func(ctx context.Context, enabled bool) error
+	// OAuth arms Wayfindr's authorization server and reads and answers its
+	// pending authorizations (ADR 0022). The daemon adapts the server to it.
+	// Nil answers the arm and the three request routes with 501.
+	OAuth OAuthRequests
 	// TestRemote sends MCP requests to publicURL's /mcp with token, as a
-	// cloud agent would, and reports how far they got. Every failure is a
+	// cloud agent would, and reports how far they got. An empty token is the
+	// OAuth probe: it checks the authorization server's documents instead of
+	// sending a token. Every failure is a
 	// RemoteTestResult with an Outcome, not an error; the caller sets OK. The
 	// daemon implements it, since admin imports no HTTP client package
 	// (design §2). It must neither store nor log token. Nil answers POST
@@ -138,6 +150,8 @@ const (
 	pathConnectors = "/admin/connectors"
 	pathPublicURL  = "/admin/server/public-url"
 	pathRemoteTest = "/admin/remote/test"
+
+	pathOAuthSettings = "/admin/server/oauth"
 )
 
 // New returns the handler for every /admin/* route. A path it doesn't know
@@ -162,7 +176,13 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("POST "+pathConnectors, a.addConnector)
 	mux.HandleFunc("GET "+pathPublicURL, a.publicURL)
 	mux.HandleFunc("PUT "+pathPublicURL, a.setPublicURL)
+	mux.HandleFunc("GET "+pathOAuthSettings, a.getOAuthSettings)
+	mux.HandleFunc("PUT "+pathOAuthSettings, a.putOAuthSettings)
 	mux.HandleFunc("POST "+pathRemoteTest, a.remoteTest)
+	mux.HandleFunc("POST "+pathOAuthArm, a.withOAuth(a.armOAuth))
+	mux.HandleFunc("GET "+pathOAuthRequests+"{id}", a.withOAuth(a.getOAuthRequest))
+	mux.HandleFunc("POST "+pathOAuthRequests+"{id}/approve", a.withOAuth(a.approveOAuthRequest))
+	mux.HandleFunc("POST "+pathOAuthRequests+"{id}/deny", a.withOAuth(a.denyOAuthRequest))
 
 	return mux
 }

@@ -12,28 +12,29 @@ section as "design §N", and the file for §N is `design/N-<topic>.md`, so
 `ls docs/internal/design/7.5-*` finds §7.5. Section numbers and file names stay
 put; add a subsection inside a file rather than renumbering.
 
-| §    | File                                       | What it covers                                                                        |
-| ---- | ------------------------------------------ | ------------------------------------------------------------------------------------- |
-| 1    | [Stack](design/1-stack.md)                 | Go version and every dependency.                                                      |
-| 2    | [Package map](design/2-package-map.md)     | Each `internal/` package and the one-way import graph.                                |
-| 3    | [Paths and identity](design/3-paths.md)    | Config, data, token, key, lock, and log file locations; `.wayfindr.toml` lookup.      |
-| 4    | [Configuration](design/4-configuration.md) | Load, templates and when they resolve, validation, and the config file editor.        |
-| 5    | [Data model](design/5-data-model.md)       | Tables and migrations for both drivers.                                               |
-| 6    | [Store interface](design/6-store.md)       | What the `Store` interface promises and why.                                          |
-| 7.1  | [`secrets`](design/7.1-secrets.md)         | Master key sourcing and the sealer.                                                   |
-| 7.2  | [`upstream`](design/7.2-upstream.md)       | Transports, the connector manager, states, errors and advice, elicitation relay.      |
-| 7.3  | [`auth`](design/7.3-auth.md)               | OAuth discovery, registration, flows, the broker and refresh, health, client binding. |
-| 7.4  | [`catalog`](design/7.4-catalog.md)         | Sync, embed text, the tools-list filter, hidden tools.                                |
-| 7.5  | [Search algorithm](design/7.5-search.md)   | Tokenizing, BM25F, typo expansion, embeddings, and fusion.                            |
-| 7.6  | [`gateway`](design/7.6-gateway.md)         | `search_tools`, `call_tool`, request narrowing, `input_required`, call recording.     |
-| 7.7  | [`httpd`](design/7.7-httpd.md)             | Listener, guards, client tokens, the auth pages, and the admin client.                |
-| 7.8  | [`daemon`](design/7.8-daemon.md)           | Startup, reload, polling, the call log, health checks, and shutdown, step by step.    |
-| 7.9  | [CLI](design/7.9-cli.md)                   | How commands reach the daemon, the shim, `daemonctl`, and error handling.             |
-| 7.10 | [`webui`](design/7.10-webui.md)            | The web console: routes, login codes and sessions, rendering, htmx, CSP.              |
-| 8    | [Key sequences](design/8-sequences.md)     | End-to-end flows across packages.                                                     |
-| 9    | [Security checklist](design/9-security.md) | Invariants every change must keep, including redaction.                               |
-| 10   | [Testing](design/10-testing.md)            | Fakes, suites, golden files, and what CI runs.                                        |
-| 11   | Milestones                                 | Below.                                                                                |
+| §    | File                                        | What it covers                                                                        |
+| ---- | ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| 1    | [Stack](design/1-stack.md)                  | Go version and every dependency.                                                      |
+| 2    | [Package map](design/2-package-map.md)      | Each `internal/` package and the one-way import graph.                                |
+| 3    | [Paths and identity](design/3-paths.md)     | Config, data, token, key, lock, and log file locations; `.wayfindr.toml` lookup.      |
+| 4    | [Configuration](design/4-configuration.md)  | Load, templates and when they resolve, validation, and the config file editor.        |
+| 5    | [Data model](design/5-data-model.md)        | Tables and migrations for both drivers.                                               |
+| 6    | [Store interface](design/6-store.md)        | What the `Store` interface promises and why.                                          |
+| 7.1  | [`secrets`](design/7.1-secrets.md)          | Master key sourcing and the sealer.                                                   |
+| 7.2  | [`upstream`](design/7.2-upstream.md)        | Transports, the connector manager, states, errors and advice, elicitation relay.      |
+| 7.3  | [`auth`](design/7.3-auth.md)                | OAuth discovery, registration, flows, the broker and refresh, health, client binding. |
+| 7.4  | [`catalog`](design/7.4-catalog.md)          | Sync, embed text, the tools-list filter, hidden tools.                                |
+| 7.5  | [Search algorithm](design/7.5-search.md)    | Tokenizing, BM25F, typo expansion, embeddings, and fusion.                            |
+| 7.6  | [`gateway`](design/7.6-gateway.md)          | `search_tools`, `call_tool`, request narrowing, `input_required`, call recording.     |
+| 7.7  | [`httpd`](design/7.7-httpd.md)              | Listener, guards, client tokens, the auth pages, and the admin client.                |
+| 7.8  | [`daemon`](design/7.8-daemon.md)            | Startup, reload, polling, the call log, health checks, and shutdown, step by step.    |
+| 7.9  | [CLI](design/7.9-cli.md)                    | How commands reach the daemon, the shim, `daemonctl`, and error handling.             |
+| 7.10 | [`webui`](design/7.10-webui.md)             | The web console: routes, login codes and sessions, rendering, htmx, CSP.              |
+| 7.11 | [`oauthserver`](design/7.11-oauthserver.md) | Wayfindr's authorization server: metadata, authorize, approve, tokens, and its seams. |
+| 8    | [Key sequences](design/8-sequences.md)      | End-to-end flows across packages.                                                     |
+| 9    | [Security checklist](design/9-security.md)  | Invariants every change must keep, including redaction.                               |
+| 10   | [Testing](design/10-testing.md)             | Fakes, suites, golden files, and what CI runs.                                        |
+| 11   | Milestones                                  | Below.                                                                                |
 
 ## 11. Milestones
 

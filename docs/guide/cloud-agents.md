@@ -3,17 +3,18 @@
 A cloud agent is an AI agent that runs on its vendor's computers, not on yours,
 and stays on all the time. Wayfindr can give these agents your connectors (the
 MCP servers you added to Wayfindr, such as Gmail or Linear) through a tunnel you
-run, with a token that reaches only the connectors you pick.
+run. Each agent reaches only the connectors you pick for it.
 
-| Agent       | Works with Wayfindr? | How it signs in                                           |
-| ----------- | -------------------- | --------------------------------------------------------- |
-| Grok Bot    | Yes                  | An `Authorization` header you add to a connector          |
-| Muse (Meta) | Yes                  | A key you give Muse's secure credential prompt            |
-| ChatGPT     | Not yet              | It can only sign in with OAuth, which isn't supported yet |
+| Agent       | Works with Wayfindr? | How it signs in                                                                              |
+| ----------- | -------------------- | -------------------------------------------------------------------------------------------- |
+| Grok Bot    | Yes                  | An `Authorization` header you add to a connector                                             |
+| Muse (Meta) | Yes                  | A key you give Muse's secure credential prompt                                               |
+| ChatGPT     | Yes                  | OAuth: you approve it once, in a browser on the computer that runs Wayfindr ([steps](#chatgpt)) |
 
-The short path: start a tunnel, open the console's **Cloud agents** page, and
-follow its six steps. This page walks through each one, then shows the tunnels
-and each agent in detail.
+The short path for Grok Bot and Muse: start a tunnel, open the console's **Cloud
+agents** page, and follow its six steps. This page walks through each one, then
+shows the tunnels and each agent in detail. ChatGPT has no token, so it has
+[its own steps](#chatgpt).
 
 ## Why you need a tunnel
 
@@ -26,22 +27,26 @@ and you choose which one. Wayfindr never starts, stops, or configures a tunnel.
 
 ## How it stays safe
 
-- **One token for one agent.** You make a _remote token_ for each cloud agent.
-  It reaches only the connectors you pick for it. It can't use your other
-  connectors, and it can't change Wayfindr's settings.
+- **One token for one agent.** You make a _remote token_ for each cloud agent
+  that sends a header. It reaches only the connectors you pick for it. It can't
+  use your other connectors, and it can't change Wayfindr's settings. ChatGPT
+  gets the same limits from an _OAuth grant_ you approve instead.
 - **Almost nothing else is reachable.** Through the tunnel, only the MCP address,
-  `/mcp` (where agents talk to Wayfindr), answers, and only to a remote token.
-  Sign-in callbacks pass too. Your default client token (the one `wayfindr init`
-  made, which reaches every connector), the console, and everything else stay on
-  your computer, even if someone finds your tunnel's address. The full rule is
-  in [Security](./security#loopback-only).
-- **You can cut it off.** Revoke the token and the agent is refused from its next
-  request. Stop the tunnel and every cloud agent is cut off at once.
+  `/mcp` (where agents talk to Wayfindr), answers, and only to a remote token or
+  an OAuth grant. Sign-in callbacks pass too. Your default client token (the one
+  `wayfindr init` made, which reaches every connector), the console, and
+  everything else stay on your computer, even if someone finds your tunnel's
+  address. While you have ChatGPT's sign-in on, a few more addresses answer, and
+  only those. The full rule is in [Security](./security#loopback-only).
+- **You can cut it off.** Revoke the token or the grant and the agent is refused
+  from its next request. Stop the tunnel and every cloud agent is cut off at
+  once.
 
 The token is the only lock on the tunnel, so treat it like a password: give it to
 one agent only, and **never paste it into a chat**. The details are in
-[Security](./security#loopback-only) and
-[ADR 0021](../adr/0021-remote-client-tokens).
+[Security](./security#loopback-only),
+[ADR 0021](../adr/0021-remote-client-tokens), and, for ChatGPT's sign-in,
+[ADR 0022](../adr/0022-authorization-server-for-remote-clients).
 
 ## Before you start
 
@@ -52,7 +57,8 @@ You need:
   background.
 - A tunnel that gives Wayfindr a public `https` address. If you don't have one,
   [set one up first](#set-up-a-tunnel).
-- The agent's account: a Grok Bot, or Muse.
+- The agent's account: a Grok Bot, Muse, or a ChatGPT plan that can add a custom
+  MCP server.
 
 ## Connect an agent from the console
 
@@ -70,7 +76,8 @@ anything to the agent.
 2. Select **Cloud agents** in the left menu. A progress bar shows the six steps.
 
 3. **Step 1, Pick your agent.** Choose **Grok Bot** or **Muse**, then select
-   **Next: connectors**. ChatGPT is listed but greyed out: it says "Not yet".
+   **Next: connectors**. For ChatGPT, which has no token, follow
+   [its own steps](#chatgpt) instead.
 
 4. **Step 2, Pick connectors.** Tick only the connectors this agent needs, then
    select **Next: public URL**. The agent can find and call tools from these
@@ -118,10 +125,22 @@ connection** again.
 | "… did not answer in time"                                                                    | The tunnel or Wayfindr is stopped or stuck. Check that both are running, then test again.                                                                                                                                                                               |
 | "… answered with a web page instead of Wayfindr"                                              | A page is in the way: a login page, a warning page, or a tunnel's "offline" page. Turn off the login or warning page, or check that the tunnel is running. See [ngrok's browser warning](#ngrok-s-browser-warning).                                                     |
 | "… redirected the request to …"                                                               | The address sends visitors somewhere else. Use the exact address the tunnel serves, with `https` and no redirect.                                                                                                                                                       |
-| "… answered 404. Through a tunnel, Wayfindr answers that when the token is …"                 | This is Wayfindr's own 404. The token isn't a remote token, is wrong, or was revoked; or the URL is wrong. Check that you made the token in this wizard and it is still in the list below, that the address is your tunnel's, and the tunnel points at Wayfindr's port. |
-| "… refused the request (HTTP 401 or 403)"                                                     | A login or access check in front of Wayfindr, in the tunnel or a proxy, stops the request before Wayfindr sees the token. Turn it off for this address.                                                                                                                 |
+| "… answered 404. With sign-in (OAuth) off, Wayfindr answers that …"                           | This is Wayfindr's own 404. With ChatGPT's sign-in off, the token isn't a remote token, is wrong, or was revoked; or the URL is wrong. With sign-in on, a bad token gets a 401 instead, so a 404 means the request didn't reach Wayfindr's `/mcp`. Check that you made the token in this wizard and it is still in the list below, that the address is your tunnel's, and the tunnel points at Wayfindr's port. |
+| "… answered 401: Wayfindr does not accept this token"                                         | Only with ChatGPT's sign-in on. The token isn't a remote token, is wrong, or was revoked. Check that you made it in this wizard and it is still in the list below.                                                                                                      |
+| "… refused the request (HTTP 401 or 403), and not with Wayfindr's own answer"                 | A login or access check in front of Wayfindr, in the tunnel or a proxy, stops the request before Wayfindr sees the token. Turn it off for this address.                                                                                                                 |
 | "… answered, but not like Wayfindr's MCP endpoint", or "answered HTTP …"                      | The address reaches something else. Check that the tunnel points at Wayfindr's port and that Wayfindr is running.                                                                                                                                                       |
 | "The token works, but the same request without a token got HTTP …"                            | The test can't confirm the path is safe. The tunnel may not be marking requests as coming from the internet. Make it add a forwarding header, as in [the checklist](#any-other-tunnel-or-proxy).                                                                        |
+
+For ChatGPT, **Test the connection** checks Wayfindr's sign-in instead of a token.
+It sends no token. The results above that name the address, the tunnel, or a web
+page mean the same here. These are the ones only the sign-in test gives:
+
+| The result says                                                                  | What it means and what to do                                                                                                                                                              |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "It works. Through the tunnel, a cloud agent finds Wayfindr's sign-in at …"      | Wayfindr's sign-in information is there and names your public address. Go on to ChatGPT.                                                                                                  |
+| "Sign-in with OAuth is off …"                                                    | Turn on sign-in, then test again.                                                                                                                                                         |
+| "… does not give the sign-in information a cloud agent looks for"                | Wayfindr's sign-in information isn't there. Check that sign-in is on, that the public URL is your tunnel's address, and that the tunnel passes `/.well-known/` and `/oauth/` to Wayfindr. |
+| "The sign-in information at … names another address than the public URL"         | Set the public URL to the exact address your tunnel serves, with `https` and the same host name, or point the tunnel at this Wayfindr.                                                    |
 
 For the full list of results, see
 [Testing a cloud agent's connection](../reference/http#remote-test).
@@ -191,9 +210,12 @@ console.
    You want the status line `HTTP/2 404` (or `HTTP/1.1 404`) and the exact body
    `404 page not found`. A `404` with any other body, or with an
    `ngrok-error-code` header, comes from the tunnel, not from Wayfindr. For ngrok
-   it means the tunnel is off. If you get `401` with `WWW-Authenticate: Bearer`,
-   your tunnel makes outside requests look local, which is
-   [the not-safe case](#the-not-safe-warning).
+   it means the tunnel is off. If you get `401` with `WWW-Authenticate: Bearer`
+   and nothing after it, your tunnel makes outside requests look local, which is
+   [the not-safe case](#the-not-safe-warning). While ChatGPT's sign-in is on, a
+   request from the internet gets `401` with
+   `WWW-Authenticate: Bearer resource_metadata="https://your-name.ngrok-free.dev/.well-known/oauth-protected-resource/mcp"`
+   instead of the `404`. That is right.
 
    Then, with your token:
 
@@ -214,7 +236,9 @@ console.
    ```
 
    A `404` means the token isn't a remote token, is wrong, or was revoked, or the
-   address is wrong. A `401` or `403` is a login in front of Wayfindr.
+   address is wrong. With ChatGPT's sign-in on, a wrong or revoked token gets
+   `401` with `error="invalid_token"` in `WWW-Authenticate`. Any other `401`, or
+   a `403`, is a login in front of Wayfindr.
 
 Then set up the agent: [Grok Bot](#grok-bot) or [Muse](#muse). Use
 `<your public URL>/mcp` as its server address.
@@ -365,9 +389,10 @@ The console's test checks most of it.
 
 - **No login or warning page in front.** An agent can't sign in to a proxy, or
   click through a page.
-- **Only `/mcp` is exposed, if the tool allows path rules.** Wayfindr already
-  refuses everything else through a tunnel, but one less open path is one less
-  thing to worry about.
+- **Only the paths Wayfindr serves are exposed, if the tool allows path rules.**
+  Wayfindr already refuses everything else through a tunnel, but one less open
+  path is one less thing to worry about. For Grok Bot and Muse that is `/mcp`.
+  For ChatGPT it is also `/.well-known/` and `/oauth/`.
 
 Run **Test connection** when you're done. It tells you which item failed.
 
@@ -441,9 +466,137 @@ message again.
 
 ## ChatGPT
 
-ChatGPT isn't supported yet. It can't send an `Authorization` header: a ChatGPT
-connector signs in with OAuth or with nothing. Wayfindr doesn't yet act as an
-OAuth server, which ChatGPT needs.
+ChatGPT's custom connector form has no field for a header, so it can't use a
+remote token. It signs in with OAuth instead. With sign-in on, Wayfindr answers
+ChatGPT's sign-in requests through your tunnel, and you approve ChatGPT once, in
+your browser, on the computer that runs Wayfindr. You pick the connectors it may
+use at that moment. ChatGPT's always-on dots use the same connector, so there is
+nothing more to set up for them.
+
+::: info
+These steps follow OpenAI's documentation for custom MCP servers, which changes
+often. If a screen differs, look for the same names, or
+[open an issue](https://github.com/atomicpages/wayfindr/issues).
+:::
+
+You need:
+
+- A tunnel, as in [Before you start](#before-you-start). It must pass every path
+  to Wayfindr, because ChatGPT also looks for Wayfindr's sign-in addresses.
+- A ChatGPT plan that can add a custom MCP server: on ChatGPT on the web, a
+  **Plugins** menu with an option to add one.
+- A browser on the computer that runs Wayfindr, to approve the sign-in.
+
+1. Open the console with `wayfindr ui` and select **Cloud agents**.
+2. **Pick your agent.** Choose **ChatGPT** and select **Next: connectors**. The
+   wizard skips the connectors step and creates no token: you pick the connectors
+   when you approve.
+3. **Your public address.** Start your tunnel, paste its `https` address, and
+   select **Save and continue**, as for the other agents.
+4. **Turn on sign-in.** The page says what turning it on opens through the tunnel:
+   Wayfindr's sign-in information, and its sign-in and token addresses. Select the
+   button to turn on sign-in (OAuth). Wayfindr saves it in your config file as
+   `server.oauth.enabled` and arms a connection.
+5. **Connect.** The page shows what to enter in ChatGPT and, once armed, "Ready
+   for ChatGPT until" a time 10 minutes ahead. An arm is what lets a sign-in
+   through: without it, Wayfindr refuses every sign-in request. If the time
+   passes, select **Connect a client** to arm again. Select **Test the
+   connection** if you like. See
+   [what the test result means](#what-the-test-result-means).
+6. In ChatGPT on the web, open **Plugins**, select **+**, then **Add custom MCP
+   server**, and fill in the form:
+
+   | Field          | What to enter                                                                   |
+   | -------------- | ------------------------------------------------------------------------------- |
+   | Server URL     | Your public address with `/mcp`, such as `https://your-name.ngrok-free.dev/mcp` |
+   | Authentication | **OAuth**                                                                       |
+
+   There is nothing to paste: ChatGPT identifies itself to Wayfindr by its own
+   address, so leave any client ID or secret empty.
+
+7. ChatGPT sends your browser to Wayfindr's approve page, on this computer. On
+   ngrok's free plan, your browser may first show ngrok's "You are about to
+   visit" page: select **Visit Site**. See
+   [ngrok's browser warning](#ngrok-s-browser-warning).
+8. Check the page. It names the client and its host, the host your browser returns
+   to, when the request started, and the IP address your tunnel reported for the
+   browser, labelled "reported by your tunnel". Keep the suggested name, such as
+   `chatgpt`, or change it: it shows in the call log and in `wayfindr token list`.
+   Tick only the connectors ChatGPT needs, then select **Approve**. Your browser
+   goes back to ChatGPT, which is now connected.
+
+To connect again, for another ChatGPT account or after you changed the public
+URL, select **Connect a client** on the **Cloud agents** page. It is on the
+ChatGPT row as long as sign-in is on.
+
+### The approve page
+
+The page says: "Approve only if you clicked Connect in ChatGPT in the last few
+minutes. If someone sent you this link, or this page opened in a tab you didn't
+open, choose Deny."
+
+::: warning
+Anyone can start a sign-in to your public address from their own ChatGPT account
+and send you the link. If you approve it, their account gets the connectors you
+tick. Approve only a request you started a minute ago. If you didn't, or the
+start time or the IP address isn't what you expect, select **Deny**.
+:::
+
+Three things keep that narrow, and none rules it out. A sign-in is let through
+only in the 10 minutes after you select **Connect a client**, and when you open the
+approve page for your own request, every other waiting request is dropped. And
+only one request is expected in those minutes, yours: if more than one arrived,
+the page can't approve any of them. See
+[Security](./security#cloud-agents-that-sign-in) for the whole picture.
+
+#### When more than one request arrived
+
+A web page you have open can open the approve page in a new tab with a
+stranger's request, while you are connecting. It looks like your own: the plain
+page with a **Continue** button. So Wayfindr counts the requests that arrived
+after you selected **Connect a client**. When there was more than one, the approve
+page shows no **Approve** button and says, for example:
+
+> 2 connection requests arrived after you selected Connect a client. Only one was
+> expected, so this can't be approved. Choose Deny, then select Connect a client
+> and try again in ChatGPT.
+
+Select **Deny**, then **Connect a client** on the **Cloud agents** page, and add
+the connector in ChatGPT again. A stranger's request costs you that retry, never
+a grant. It also happens if ChatGPT itself sent two requests, such as when you
+selected its connect button twice.
+
+You approve only from a browser on the computer that runs Wayfindr. The approve
+page is part of the console, which answers only on that computer's loopback
+address, so it never opens from your phone or another computer, even when ChatGPT
+is running there. Start the sign-in from a browser on the Wayfindr computer.
+
+The first page may be a plain one with a **Continue** button, because your browser
+arrives from another site and the console doesn't know you yet. It says:
+"Continue only if you just selected Connect in an app. If this tab opened without
+you opening it, or from a link someone sent you, close it instead." Select
+**Continue**. If it comes back, you aren't signed in: run `wayfindr ui`, then
+select **Continue** again. The request waits until the time the Cloud agents page
+showed after you selected **Connect a client**. If the page says the request
+expired or was already answered, start connecting again in ChatGPT.
+
+### Cutting ChatGPT off
+
+- `wayfindr token list` shows the grant with the kind `oauth` and ChatGPT's host,
+  next to your tokens. `wayfindr token revoke <name>` deletes it, and ChatGPT is
+  refused from its next request. The console's lists have a **Revoke** button for
+  it too.
+- ChatGPT's access lasts an hour and renews on its own. You do nothing.
+- Turning sign-in off, changing the public URL, or removing ChatGPT from
+  `server.oauth.clients` suspends the grant: ChatGPT is refused until you undo the
+  change, and then it works again. It also ends a **Connect a client** in progress:
+  a request waiting for approval is dropped, so select **Connect a client** again
+  to connect.
+
+### Not supported
+
+OpenAI's Secure MCP Tunnel is not supported. Wayfindr works through a tunnel you
+run, the same one for every cloud agent.
 
 ## Good habits
 
@@ -459,12 +612,16 @@ OAuth server, which ChatGPT needs.
     **Always ask** set how often it asks, and you can set permissions for each
     connector.
 
-  Both vendors name these settings for their connected apps in general, and they
+  - ChatGPT can ask you to confirm a custom connector's tool calls. Keep that on
+    until you trust it.
+
+  The vendors name these settings for their connected apps in general, and they
   may apply differently to a custom connector. Check your agent's approval
   settings after you add Wayfindr.
 
 - **Give each agent its own token** and only the connectors it needs. If one
-  leaks, you revoke one token, and nothing else stops.
+  leaks, you revoke one token, and nothing else stops. For ChatGPT, tick only the
+  connectors it needs when you approve it.
 - **Hide write tools for a read-only agent.** A remote token can use every tool its
   connectors' [tools list](./access/tools-lists) exposes. Set a list such as
   `tools = ["@read"]` on a connector to allow only the tools the upstream marks

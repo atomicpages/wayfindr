@@ -79,6 +79,30 @@ CREATE TABLE client_tokens (            -- scoped client tokens (ADR 0012)
   PRIMARY KEY (user_id, name)
 );
 
+CREATE TABLE oauth_grants (             -- OAuth grants (ADR 0022); names shared with client_tokens
+  user_id      TEXT NOT NULL REFERENCES users(id),
+  name         TEXT NOT NULL,             -- connector-name rule; never 'default'; no client_tokens row has it
+  client_id    TEXT NOT NULL,             -- the allowed client's CIMD URL
+  resource     TEXT NOT NULL,             -- <public_url>/mcp when approved (RFC 8707)
+  connectors   TEXT NOT NULL,             -- JSON array of connector names, at least one
+  created_at   INTEGER NOT NULL,
+  last_used_at INTEGER,                   -- NULL until its access token is first used
+  PRIMARY KEY (user_id, name)
+);
+
+CREATE TABLE oauth_tokens (             -- a grant's access and refresh tokens
+  digest       BLOB PRIMARY KEY,          -- SHA-256 of the token, 32 bytes
+  user_id      TEXT NOT NULL,
+  grant_name   TEXT NOT NULL,             -- `grant` is an SQL keyword
+  kind         TEXT NOT NULL CHECK (kind IN ('access', 'refresh')),
+  created_at   INTEGER NOT NULL,
+  expires_at   INTEGER,                   -- access: set; refresh: NULL (no expiry)
+  used_at      INTEGER,                   -- refresh: when it was spent; NULL until then
+  FOREIGN KEY (user_id, grant_name) REFERENCES oauth_grants (user_id, name) ON DELETE CASCADE
+);
+
+CREATE INDEX oauth_tokens_grant ON oauth_tokens (user_id, grant_name);
+
 CREATE TABLE calls (                    -- the call log: one row per call_tool call
   id          TEXT PRIMARY KEY,           -- UUIDv7
   user_id     TEXT NOT NULL,
@@ -129,8 +153,23 @@ CREATE INDEX calls_user_started ON calls (user_id, started_at DESC, id DESC);
   `TouchClientTokens` is keyed by digest, never moves `last_used_at` backwards,
   and ignores digests revoked since they were used, so a token created again
   under a revoked name never inherits the old one's last use.
+- **OAuth grants** (ADR 0022, [§7.11](7.11-oauthserver.md)) are SQLite
+  `0008_oauth.sql` and Postgres `0012_oauth.sql`, additive only. Postgres uses
+  `uuid` for `user_id`, `text[]` for `connectors` (`cardinality > 0`),
+  `bytea` for `digest` (`octet_length(digest) = 32`), and `timestamptz`, with
+  the same `CHECK` on `kind` and the same cascade. A grant's name and a scoped
+  client token's share one name space: `CreateOAuthGrant` and
+  `CreateClientToken` each check the other table in their transaction. Tokens
+  are stored as digests only. A grant has at most one access token and one
+  live refresh token; the refresh tokens it spent stay, so a reuse can be
+  seen, until `PruneOAuth` drops them. How rotation and pruning work is in
+  [§7.11](7.11-oauthserver.md). Deleting a grant deletes its tokens by
+  cascade (SQLite's `foreign_keys` pragma is on). `last_used_at` is written by
+  `TouchOAuthGrants` from the access tokens' digests, as `TouchClientTokens`
+  does.
 - **`calls.token_name`** names the client token a call authenticated with:
-  `default` or a scoped token's name, which httpd verified, never a token value.
+  `default`, a scoped token's name, or an OAuth grant's, which httpd verified,
+  never a token value.
   `calls.client` stays the `clientInfo` name the client asserts. Rows logged
   before the migration have `token_name` NULL.
 - **`calls.error_text`** (ADR 0014, amended) is the error text of a call that

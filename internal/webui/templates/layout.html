@@ -77,6 +77,14 @@ pass. */}}
   </div>
 </div>{{end}}
 
+{{/* The connector checkboxes of the Cloud agents wizard and the approve page,
+from `picker connectors picked`. */}}
+{{define "picker"}}<div class="options">
+        {{range .Connectors}}<label class="check option" for="cc-{{.}}"><input type="checkbox" id="cc-{{.}}" name="connector"
+            value="{{.}}"{{if index $.Picked .}} checked{{end}}>{{template "mini" (logo .)}}{{.}}</label>
+        {{end}}
+      </div>{{end}}
+
 {{define "badge"}}<span class="badge {{.Class}}"><span class="dot"></span>{{.Label}}</span>{{end}}
 
 {{define "icons"}}<svg class="sprite" aria-hidden="true" focusable="false">

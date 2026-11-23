@@ -20,7 +20,8 @@ import (
 const MaxTokenBody = 64 << 10
 
 // ClientTokens creates, lists, and revokes scoped client tokens
-// (docs/internal/plans/scoped-client-tokens.md). The daemon adapts the
+// (docs/internal/plans/scoped-client-tokens.md), and lists and revokes the
+// OAuth grants that share their name space (ADR 0022). The daemon adapts the
 // store and the registry httpd resolves bearers with to it, so a token is
 // accepted from its creation and refused from its revoke. Admin checks the
 // request before it calls Create; ClientTokens checks nothing of it.
@@ -33,8 +34,11 @@ type ClientTokens interface {
 	Create(ctx context.Context, name string, connectors []string, remote bool) (store.ClientToken, string, error)
 	// List returns every scoped token, ordered by name.
 	List(ctx context.Context) ([]store.ClientToken, error)
-	// Revoke deletes the token called name and stops accepting it. An
-	// unknown name is an error wrapping store.ErrNotFound.
+	// ListGrants returns every OAuth grant, ordered by name.
+	ListGrants(ctx context.Context) ([]store.OAuthGrant, error)
+	// Revoke deletes the scoped token or else the OAuth grant called name
+	// and stops accepting it. An unknown name is an error wrapping
+	// store.ErrNotFound.
 	Revoke(ctx context.Context, name string) error
 }
 
@@ -65,21 +69,38 @@ type TokenCreated struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// TokenKind is what a listed Token is.
+type TokenKind string
+
+const (
+	// TokenKindToken is a scoped client token.
+	TokenKindToken TokenKind = "token"
+	// TokenKindOAuth is an OAuth grant (ADR 0022).
+	TokenKindOAuth TokenKind = "oauth"
+)
+
 // TokenList is the response to GET /admin/tokens.
 type TokenList struct {
-	// Tokens are the scoped tokens, ordered by name. Always an array.
+	// Tokens are the scoped tokens and the OAuth grants, ordered by name.
+	// Always an array.
 	Tokens []Token `json:"tokens"`
 }
 
-// Token is one scoped client token as GET /admin/tokens lists it, without
-// its value.
+// Token is one scoped client token or OAuth grant as GET /admin/tokens lists
+// it, without its value.
 type Token struct {
-	Name       string   `json:"name"`
-	Connectors []string `json:"connectors"`
-	// Remote is whether the token may reach /mcp through a tunnel.
+	Name string `json:"name"`
+	// Kind is TokenKindToken, or TokenKindOAuth for an OAuth grant.
+	Kind       TokenKind `json:"kind"`
+	Connectors []string  `json:"connectors"`
+	// Client is an OAuth grant's client ID; absent for a scoped token.
+	Client string `json:"client,omitempty"`
+	// Remote is whether the token may reach /mcp through a tunnel; always
+	// true for an OAuth grant.
 	Remote    bool      `json:"remote"`
 	CreatedAt time.Time `json:"created_at"`
-	// LastUsedAt is when a client last presented the token, as the daemon
+	// LastUsedAt is when a client last presented the token (for a grant, its
+	// access token), as the daemon
 	// last recorded it (at most a minute late); absent until first use.
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
@@ -120,7 +141,7 @@ func (a api) createToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	connectors, msg := a.checkTokenSpec(spec)
+	connectors, msg := a.checkTokenSpec(spec, "client token")
 
 	if msg != "" {
 		http.Error(w, msg, http.StatusBadRequest)
@@ -131,7 +152,7 @@ func (a api) createToken(w http.ResponseWriter, r *http.Request) {
 	row, value, err := a.Tokens.Create(r.Context(), spec.Name, connectors, spec.Remote)
 
 	if errors.Is(err, store.ErrExists) {
-		http.Error(w, fmt.Sprintf("a client token called %q already exists; revoke it first to replace it", spec.Name), http.StatusConflict)
+		http.Error(w, fmt.Sprintf("a client token or OAuth grant called %q already exists", spec.Name), http.StatusConflict)
 
 		return
 	}
@@ -149,16 +170,17 @@ func (a api) createToken(w http.ResponseWriter, r *http.Request) {
 
 // checkTokenSpec checks spec against the naming rule and the running
 // config. It returns spec's connectors without repeats, in the order
-// given, or msg saying what is wrong.
-func (a api) checkTokenSpec(spec TokenSpec) (connectors []string, msg string) {
+// given, or msg saying what is wrong. subject names what is being made in
+// msg: "client token", or "connection" on the OAuth approve page.
+func (a api) checkTokenSpec(spec TokenSpec, subject string) (connectors []string, msg string) {
 	switch {
 	case spec.Name == clienttoken.DefaultName:
 		return nil, fmt.Sprintf("%q is reserved for the default client token; choose another name", clienttoken.DefaultName)
 	case !config.IsConnectorName(spec.Name):
 		// %.64q bounds the echoed name.
-		return nil, fmt.Sprintf("client token name %.64q must match %s", spec.Name, config.NameGrammar)
+		return nil, fmt.Sprintf("%s name %.64q must match %s", subject, spec.Name, config.NameGrammar)
 	case len(spec.Connectors) == 0:
-		return nil, "a client token needs at least one connector"
+		return nil, "a " + subject + " needs at least one connector"
 	}
 
 	configured := a.Config().Connectors
@@ -190,53 +212,100 @@ func unknownConnector(name string, configured []string) string {
 	return msg + "; configured: " + strings.Join(slices.Sorted(slices.Values(configured)), ", ")
 }
 
-// listTokens serves GET /admin/tokens.
+// listTokens serves GET /admin/tokens: the scoped tokens and the OAuth
+// grants, merged and ordered by name.
 func (a api) listTokens(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.Tokens.List(r.Context())
 
 	if err != nil {
-		a.Logger.Error().Err(err).Msg("list client tokens")
-		http.Error(w, "listing client tokens failed; see the daemon log", http.StatusInternalServerError)
+		a.listTokensFailed(w, err)
 
 		return
 	}
 
-	res := TokenList{Tokens: make([]Token, 0, len(rows))}
+	grants, err := a.Tokens.ListGrants(r.Context())
 
-	for _, t := range rows {
-		tok := Token{Name: t.Name, Connectors: t.Connectors, Remote: t.Remote, CreatedAt: t.CreatedAt.UTC()}
+	if err != nil {
+		a.listTokensFailed(w, err)
 
-		if t.LastUsedAt != nil {
-			at := t.LastUsedAt.UTC()
-			tok.LastUsedAt = &at
-		}
-
-		res.Tokens = append(res.Tokens, tok)
+		return
 	}
 
-	writeJSON(w, res)
+	tokens := make([]Token, 0, len(rows))
+
+	for _, t := range rows {
+		tokens = append(tokens, Token{
+			Name: t.Name, Kind: TokenKindToken, Connectors: t.Connectors, Remote: t.Remote,
+			CreatedAt: t.CreatedAt.UTC(), LastUsedAt: utcPtr(t.LastUsedAt),
+		})
+	}
+
+	oauth := make([]Token, 0, len(grants))
+
+	for _, g := range grants {
+		oauth = append(oauth, Token{
+			Name: g.Name, Kind: TokenKindOAuth, Connectors: g.Connectors, Client: g.ClientID, Remote: true,
+			CreatedAt: g.CreatedAt.UTC(), LastUsedAt: utcPtr(g.LastUsedAt),
+		})
+	}
+
+	writeJSON(w, TokenList{Tokens: mergeByName(tokens, oauth)})
 }
 
-// revokeToken serves DELETE /admin/tokens/{name}. An unknown name is 404.
+// mergeByName merges two lists, each in name order as the store returns it,
+// into one. The names are unique across both: tokens and grants share a name
+// space.
+func mergeByName(a, b []Token) []Token {
+	out := make([]Token, 0, len(a)+len(b))
+
+	for len(a) > 0 && len(b) > 0 {
+		if strings.Compare(b[0].Name, a[0].Name) < 0 {
+			out, b = append(out, b[0]), b[1:]
+		} else {
+			out, a = append(out, a[0]), a[1:]
+		}
+	}
+
+	return append(append(out, a...), b...)
+}
+
+func (a api) listTokensFailed(w http.ResponseWriter, err error) {
+	a.Logger.Error().Err(err).Msg("list client tokens and oauth grants")
+	http.Error(w, "listing client tokens and OAuth grants failed; see the daemon log", http.StatusInternalServerError)
+}
+
+// utcPtr is t in UTC, nil when t is.
+func utcPtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+
+	at := t.UTC()
+
+	return &at
+}
+
+// revokeToken serves DELETE /admin/tokens/{name}, for a scoped token or an
+// OAuth grant. An unknown name is 404.
 func (a api) revokeToken(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	err := a.Tokens.Revoke(r.Context(), name)
 
 	if errors.Is(err, store.ErrNotFound) {
 		// %.64q bounds the echoed name.
-		http.Error(w, fmt.Sprintf("no client token is called %.64q", name), http.StatusNotFound)
+		http.Error(w, fmt.Sprintf("no client token or OAuth grant is called %.64q", name), http.StatusNotFound)
 
 		return
 	}
 
 	if err != nil {
-		a.Logger.Error().Err(err).Str("client_token", name).Msg("revoke client token")
-		http.Error(w, "revoking the client token failed; see the daemon log", http.StatusInternalServerError)
+		a.Logger.Error().Err(err).Str("client_token", name).Msg("revoke client token or oauth grant")
+		http.Error(w, "revoking the client token or OAuth grant failed; see the daemon log", http.StatusInternalServerError)
 
 		return
 	}
 
-	a.Logger.Info().Str("client_token", name).Msg("client token revoked")
+	a.Logger.Info().Str("client_token", name).Msg("client token or oauth grant revoked")
 	writeJSON(w, TokenRevoked{Name: name})
 }
 

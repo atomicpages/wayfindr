@@ -1570,6 +1570,14 @@ code.user-code {
   margin-top: 2px;
 }
 
+.option-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.85rem;
+}
+
 .check.option .opt-text {
   display: grid;
   gap: 0.1rem;

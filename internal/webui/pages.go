@@ -613,6 +613,10 @@ type tokenRow struct {
 	Name       string
 	Connectors []string
 	Remote     bool
+	// OAuth marks an OAuth grant (ADR 0022); ClientHost is its client's
+	// host.
+	OAuth      bool
+	ClientHost string
 	Created    string
 	LastUsed   string
 }
@@ -630,9 +634,29 @@ func revokeFor(csrf, name, ret string) revokeForm {
 	return revokeForm{CSRF: csrf, Name: name, Return: ret}
 }
 
+// pickerView is what the "picker" template needs: the connectors to list and
+// which are ticked.
+type pickerView struct {
+	Connectors []string
+	Picked     map[string]bool
+}
+
+// pickerFor builds the "picker" template's data.
+func pickerFor(connectors []string, picked map[string]bool) pickerView {
+	return pickerView{Connectors: connectors, Picked: picked}
+}
+
 // tokenRowFor words t for a table row, relative to now.
 func tokenRowFor(now time.Time, t admin.Token) tokenRow {
 	row := tokenRow{Name: t.Name, Connectors: t.Connectors, Remote: t.Remote, Created: date(now, t.CreatedAt), LastUsed: "Never"}
+
+	if t.Kind == admin.TokenKindOAuth {
+		row.OAuth = true
+
+		if u, err := url.Parse(t.Client); err == nil {
+			row.ClientHost = u.Host
+		}
+	}
 
 	if t.LastUsedAt != nil {
 		row.LastUsed = ago(now, *t.LastUsedAt)

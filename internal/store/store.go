@@ -122,10 +122,10 @@ type Store interface {
 
 	// CreateClientToken stores a scoped client token. It fails with an
 	// error wrapping ErrExists when the user already has a token of that
-	// name or any user has one with that digest, and refuses an empty
-	// t.Connectors or a zero t.CreatedAt. CreatedAt is kept to the
-	// millisecond; t.LastUsedAt is ignored. t.Remote is stored as given and
-	// is not changed afterwards.
+	// name (or an OAuth grant has it) or any user has one with that digest,
+	// and refuses an empty t.Connectors or a zero t.CreatedAt. CreatedAt is
+	// kept to the millisecond; t.LastUsedAt is ignored. t.Remote is stored
+	// as given and is not changed afterwards.
 	CreateClientToken(ctx context.Context, t ClientToken) error
 	// ListClientTokens returns the user's scoped client tokens, digests and
 	// Remote included, ordered by name.
@@ -139,6 +139,56 @@ type Store interface {
 	// revoked since it was used) is ignored, even if a new token has taken
 	// the old one's name.
 	TouchClientTokens(ctx context.Context, userID string, used map[[sha256.Size]byte]time.Time) error
+
+	// OAuth grants and their tokens (ADR 0022, design §7.11). A grant's
+	// name is in the name space scoped client token names are in. Only a
+	// token's digest is stored, never its value. Every time is kept to the
+	// millisecond.
+
+	// CreateOAuthGrant stores g. It fails with an error wrapping ErrExists
+	// when the user has an OAuth grant or a scoped client token of that
+	// name, and refuses an empty Connectors, ClientID, or Resource, or a
+	// zero CreatedAt. LastUsedAt is ignored.
+	CreateOAuthGrant(ctx context.Context, g OAuthGrant) error
+	// GetOAuthGrant returns the grant called name, or ErrNotFound.
+	GetOAuthGrant(ctx context.Context, userID, name string) (OAuthGrant, error)
+	// ListOAuthGrants returns the user's grants, ordered by name.
+	ListOAuthGrants(ctx context.Context, userID string) ([]OAuthGrant, error)
+	// DeleteOAuthGrant removes the grant and, by cascade, its tokens, or
+	// returns ErrNotFound.
+	DeleteOAuthGrant(ctx context.Context, userID, name string) error
+	// GetOAuthToken returns the user's token with digest d, or ErrNotFound.
+	GetOAuthToken(ctx context.Context, userID string, d [sha256.Size]byte) (OAuthToken, error)
+	// ListOAuthAccessTokens returns the user's access tokens that expire
+	// after now, ordered by grant name.
+	ListOAuthAccessTokens(ctx context.Context, userID string, now time.Time) ([]OAuthToken, error)
+	// IssueOAuthTokens stores a grant's first access and refresh tokens in
+	// one transaction (a code exchange). Both must name the same grant,
+	// which must exist (else ErrNotFound) and have no token yet (else
+	// ErrExists); access must be OAuthAccess with ExpiresAt, refresh
+	// OAuthRefresh without, and neither UsedAt.
+	IssueOAuthTokens(ctx context.Context, userID string, access, refresh OAuthToken) error
+	// RotateOAuthTokens spends the refresh token spent and stores its
+	// successors, in one transaction: it sets spent's UsedAt to at only if
+	// it is unset (one conditional UPDATE, so two racing rotations can't
+	// both win), deletes the grant's access tokens, and inserts access and
+	// refresh, which must name spent's grant; a zero at is refused. Spent
+	// refresh tokens stay
+	// (PruneOAuth drops them after OAuthSpentRetention). A refresh token
+	// already spent is ErrSpent and changes nothing; no refresh token with
+	// that digest is ErrNotFound. A failed rotation leaves spent unspent.
+	RotateOAuthTokens(ctx context.Context, userID string, spent [sha256.Size]byte, at time.Time, access, refresh OAuthToken) error
+	// TouchOAuthGrants records, for each digest that is one of the user's
+	// access tokens, that its grant was last used at that time, in one
+	// transaction. LastUsedAt never moves backwards; other digests (client
+	// tokens, revoked grants) are ignored.
+	TouchOAuthGrants(ctx context.Context, userID string, used map[[sha256.Size]byte]time.Time) error
+	// PruneOAuth deletes the user's access tokens that expired at or
+	// before now, the refresh tokens spent at or before now minus
+	// OAuthSpentRetention, and the grants that have no token and were
+	// created at or before now minus OAuthUnexchangedTTL (approved, never
+	// exchanged), and returns how many rows it deleted.
+	PruneOAuth(ctx context.Context, userID string, now time.Time) (int64, error)
 
 	// Close releases the database.
 	Close() error
@@ -347,6 +397,64 @@ type ClientToken struct {
 	// LastUsedAt is when the token was last used, as TouchClientTokens
 	// recorded it; nil until first use.
 	LastUsedAt *time.Time
+}
+
+// ErrSpent is returned by RotateOAuthTokens when the refresh token was
+// already spent: a reuse, which revokes the grant (ADR 0022).
+var ErrSpent = errors.New("already spent")
+
+const (
+	// OAuthSpentRetention is how long a spent refresh token is kept, so
+	// that presenting it again is seen as a reuse.
+	OAuthSpentRetention = 30 * 24 * time.Hour
+	// OAuthUnexchangedTTL is how long a grant with no token (approved, its
+	// code never exchanged) is kept.
+	OAuthUnexchangedTTL = 10 * time.Minute
+)
+
+// OAuthGrant is an OAuth grant (GLOSSARY): an allowed client's access,
+// approved in the console, to its connectors. Its name is in the name
+// space ClientToken names are in.
+type OAuthGrant struct {
+	UserID string
+	Name   string
+	// ClientID is the allowed client's CIMD URL.
+	ClientID string
+	// Resource is <public_url>/mcp when the grant was approved (RFC 8707).
+	Resource string
+	// Connectors are the connectors the grant may use; at least one.
+	Connectors []string
+	CreatedAt  time.Time
+	// LastUsedAt is when its access token was last used, as
+	// TouchOAuthGrants recorded it; nil until first use.
+	LastUsedAt *time.Time
+}
+
+// OAuthTokenKind is what an OAuthToken is.
+type OAuthTokenKind string
+
+const (
+	// OAuthAccess is a short-lived token that authenticates /mcp requests.
+	OAuthAccess OAuthTokenKind = "access"
+	// OAuthRefresh is a token that is spent by being exchanged for a new
+	// pair.
+	OAuthRefresh OAuthTokenKind = "refresh"
+)
+
+// OAuthToken is one access or refresh token of a grant. Only its SHA-256
+// is stored (clienttoken.Digest).
+type OAuthToken struct {
+	UserID string
+	Digest [sha256.Size]byte
+	// Grant is the grant's name.
+	Grant     string
+	Kind      OAuthTokenKind
+	CreatedAt time.Time
+	// ExpiresAt is set for an access token, nil for a refresh token.
+	ExpiresAt *time.Time
+	// UsedAt is when a refresh token was spent; nil until then, and always
+	// nil for an access token.
+	UsedAt *time.Time
 }
 
 // CallFilter selects calls for ListCalls.

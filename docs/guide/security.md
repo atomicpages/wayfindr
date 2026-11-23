@@ -11,9 +11,15 @@ where the edges are.
 | Another machine on your network calls the daemon                       | It binds to loopback only, and checks the address it actually bound.                                                                                                                                                                                                       |
 | A web page in your browser calls `127.0.0.1:7777`                      | Host and Origin checks, and the client token, which a page can't read.                                                                                                                                                                                                     |
 | Another user on the machine takes the port while the daemon is stopped | The CLI and the stdio shim send the client token only to a daemon that holds the lock in your data directory, which other users can't open. A client you set up over HTTP, with the token in its environment, does no such check: on a shared machine, use the stdio shim. |
-| DNS rebinding                                                          | A request whose `Host` isn't a loopback name or IP on the daemon's port gets 404 on every path, except what a tunnel may reach ([Loopback only](#loopback-only)).                                                                                                          |
+| DNS rebinding                                                          | A request whose `Host` isn't a loopback name or IP on the daemon's port gets 404 on every path but the OAuth callback and, with a remote client token, `/mcp`. The sign-in paths answer only your public URL's `Host`, or a request a tunnel forwarded ([Loopback only](#loopback-only)), so a rebinding page can't learn your public URL. |
 | A tunnel for the OAuth callback exposes the daemon                     | A tunnel reaches only the callback and, with a remote client token, `/mcp`. See [Loopback only](#loopback-only).                                                                                                                                                           |
 | A cloud agent's remote client token leaks                              | It reaches only its connectors, never the admin API, the console, or auth links. Revoke it, and the next request with it gets `404`.                                                                                                                                       |
+| Turning on ChatGPT's sign-in exposes more through the tunnel               | Only the sign-in information (public by design), `/oauth/authorize`, and `/oauth/token`, and only while `server.oauth.enabled` is true. None of them grants access by itself: see [Cloud agents that sign in](#cloud-agents-that-sign-in). Off, every answer is what it was before. |
+| A stranger starts a sign-in to your public address and sends you the link | You must have selected **Connect a client** in the last 10 minutes, or the endpoint answers an error page and keeps nothing. When you open the approve page for your own request, every other waiting request is dropped. The page shows when the request started and the IP your tunnel saw, and tells you to deny a link someone sent you. This narrows the risk and does not rule it out: it still depends on you. |
+| A web page you have open opens the approve page for a stranger's request while you connect | The page claims nothing until you select **Continue**, and says to continue only if you just selected Connect in an app. If you continue anyway, your own request arrives too: when more than one request arrived after you selected **Connect a client**, the approve page offers only Deny. You connect again, so it costs you a retry, never a grant. |
+| A stranger makes Wayfindr fetch a web address or fill its queue         | Only the client IDs in `server.oauth.clients` are looked at (ChatGPT's, by default). Any other gets an error page before Wayfindr fetches or keeps anything. |
+| An approval comes from somewhere other than your computer              | The approve page is part of the console, which answers only on your computer's loopback address, and needs a console session and its form token. No request through the tunnel reaches it. |
+| An OAuth grant for a cloud agent leaks                                 | It reaches only the connectors you ticked, never the admin API or the console. `wayfindr token revoke <name>` deletes the grant, and the next request with its token is refused. Its tokens are random values stored only as hashes. |
 | Someone copies your database file                                      | Secrets and tokens in it are encrypted, and the master key is normally stored elsewhere.                                                                                                                                                                                   |
 | An agent or a prompt injection tries to read credentials               | No tool returns them. Agents only get tool definitions, results, and advice.                                                                                                                                                                                               |
 | A prompt injection takes over an unattended agent                      | Give it a scoped client token: it reaches only its connectors, and no admin API.                                                                                                                                                                                           |
@@ -54,13 +60,27 @@ change that: the forwarding header still marks the request.
   minutes. See [The OAuth callback](#the-oauth-callback).
 - `/mcp`, only with a scoped client token you created as
   [remote](./access/scoped-tokens#remote-tokens), for a
-  [cloud agent](./cloud-agents), and then only that token's connectors.
+  [cloud agent](./cloud-agents), and then only that token's connectors. With
+  ChatGPT's sign-in on, an OAuth grant you approved works here the same way.
+
+While `server.oauth.enabled` is true, five more paths answer, with no token:
+`/.well-known/oauth-protected-resource`, the same with `/mcp` after it,
+`/.well-known/oauth-authorization-server`, `/oauth/authorize`, and
+`/oauth/token`. They answer only a request whose `Host` is your public URL's
+host, or one with a loopback `Host` and a forwarding header (a tunnel that
+rewrites `Host`). Any other `Host`, such as a DNS-rebinding page's, gets `404`
+on them, and on `/mcp` without a remote token, so it can't learn your public
+URL. See [Cloud agents that sign in](#cloud-agents-that-sign-in).
 
 Everything else gets `404 page not found`, whatever token it carries: the admin
 API, the console, auth links, and `/healthz`. So does `/mcp` with no token, a
 wrong or revoked token, or any token that isn't remote, the default client token
-included. It is never `401`, so a request from the internet can't learn which
-tokens exist.
+included. With sign-in off it is never `401`, so a request from the internet
+can't learn which tokens exist. With sign-in on, those requests to `/mcp`
+through your tunnel get `401` with a challenge that names the sign-in
+information, which ChatGPT needs;
+it is the same answer for every token, so it still tells a stranger nothing about
+which tokens exist.
 
 A tunnel must add one of the headers above, or its requests look local and the
 default client token would work through it; ngrok, Cloudflare Tunnel, and
@@ -100,11 +120,17 @@ listens on, except what a tunnel may reach (see
 | `GET /ui/…`                  | Loopback `Host`, no foreign `Origin`. The [console](./console#security) checks its own session. |
 | `POST /ui/…`                 | Loopback `Host` and a same-origin form. The console checks its own session.                     |
 | `/oauth/callback`            | Nothing. Checked against a pending auth flow's `state`.                                         |
+| `/.well-known/oauth-…`       | Nothing, and only while `server.oauth.enabled` is true. Public sign-in information.             |
+| `/oauth/authorize`           | Nothing, and only while sign-in is on and you armed it with **Connect a client**. Keeps the request pending. |
+| `/oauth/token`               | Nothing, and only while sign-in is on. Needs a code you approved, or a refresh token.           |
+| `/ui/oauth/approve`          | Loopback `Host`, and a console session. Never through a tunnel.                                 |
 
 A request with the wrong token gets `401`. A scoped client token on `/admin/…`
 gets `403`. A request with a foreign `Origin` gets `403`. A foreign `Host` gets
-`404` (except what a tunnel may reach, see [Loopback only](#loopback-only)), so a
-rebinding page can't even learn which paths exist.
+`404` on every path but `/oauth/callback` and, with a remote client token,
+`/mcp`; the sign-in paths answer only your public URL's `Host` or a request a
+tunnel forwarded (see [Loopback only](#loopback-only)). So a rebinding page
+can't even learn which paths exist, or your public URL.
 
 The stdio shim reads the token itself, so clients that use `wayfindr stdio`
 never see it.
@@ -122,6 +148,70 @@ destructive hints, so name the tools you allow for anything that matters.
 Profiles and project scopes are chosen by the client, so they keep a cooperative
 agent focused and are no defense; [Control what agents can use](./access/) says
 which layer holds against what.
+
+## Cloud agents that sign in
+
+ChatGPT can't send a token, so with `[server.oauth]` on, Wayfindr is its own sign-in
+server (OAuth) for `/mcp`. It is off unless you turn it on, in the console's Cloud
+agents page or with
+[`server.oauth.enabled`](../reference/configuration#server-oauth). Off, every
+answer is what it was before.
+
+**What it opens through the tunnel.** The sign-in information (two documents that
+name your public address and its sign-in and token addresses), `/oauth/authorize`,
+and `/oauth/token`. The documents hold nothing secret. The other two start and
+finish a sign-in, and neither can grant access alone:
+
+- **You arm it.** `/oauth/authorize` keeps a request only in the 10 minutes after
+  you selected **Connect a client** in the console. With no arm it answers an error page
+  and fetches nothing. There is one arm at a time, and it ends when you open the
+  approve page for your own request. Turning sign-in off or on, changing
+  `public_url`, or changing `server.oauth.clients` ends it too, and drops every
+  waiting request: select **Connect a client** again.
+- **Only listed clients.** Only the client IDs in `server.oauth.clients`, by
+  default ChatGPT's, are looked at. Wayfindr fetches one client's document from
+  its address and requires the redirect address to be in it.
+- **You approve on your computer.** The authorize address doesn't approve
+  anything. It sends your browser to the approve page in the console on the
+  loopback address, which needs your console session and its form token, and where
+  you pick the connectors. Only then does the browser go back to the client with a
+  one-time code, valid for 60 seconds. Nobody approves from another device.
+- **The token address wants that code.** A client trades it, with the secret it
+  made before it started, for an access token (one hour) and a refresh token.
+  They are random, stored only as hashes, and work only for the connectors you
+  ticked and only for `<public_url>/mcp`.
+
+**Consent phishing is narrowed, not ruled out.** The client's address and
+redirect address are public, so anyone can start a sign-in to your public address
+from their own ChatGPT account and send you the link. If you approved it, their
+account would get the connectors you tick. The arm limits that to the minutes
+after you chose **Connect a client**, and when you open your own request's approve page,
+every other waiting request is dropped, so a stranger's can't sit in front of
+yours. The page shows when the request started and the IP address your tunnel
+saw, and says: approve only if you clicked Connect in the client in the last few
+minutes; if someone sent you this link, or the page opened in a tab you didn't
+open, choose Deny.
+
+A web page you have open can also open the approve page with a stranger's request
+in a new tab while you are connecting. That tab first shows a page with a
+**Continue** button, as your own request does, which says to continue only if you
+just selected Connect in an app. Should you continue anyway, Wayfindr still won't
+approve it: it counts the requests that arrived after you selected
+**Connect a client**, and only one, yours, is expected. When more than one
+arrived, the approve page says how many, shows no Approve button, and tells you
+to choose Deny, then select **Connect a client** and try again in the client. A
+stranger's request costs you a retry, never a grant.
+
+What is left is a stranger's request that is the only one to arrive, which you
+approve despite the page, and whether the client ties its sign-in to your
+browser, which Wayfindr can't check.
+
+**Cutting it off.** `wayfindr token revoke <name>` deletes a grant and its tokens,
+and the next request is refused. Turning sign-in off, changing `public_url`, or
+removing the client from `server.oauth.clients` suspends every affected grant:
+none of its tokens work until you undo the change. The call log names the grant
+behind each call. The decision and its other options are in
+[ADR 0022](../adr/0022-authorization-server-for-remote-clients).
 
 ## The OAuth callback
 

@@ -82,6 +82,7 @@ func path(parts ...string) string { return toml.Key(parts).String() }
 func (v *validator) config(c *Config) {
 	v.server(c.Server)
 	v.publicURL(c.Server.PublicURL)
+	v.oauth(c.Server)
 	v.storage(c.Storage)
 
 	if c.Embedding != nil {
@@ -185,6 +186,66 @@ func (v *validator) publicURL(s string) {
 	case u.Path != "" && u.Path != "/":
 		v.add(at, "must not have a path: the tunnel serves the daemon at its root")
 	}
+}
+
+// oauth checks [server.oauth] (ADR 0022, design §7.11). The entries of clients
+// are checked whether or not the server is on, so a bad one is found before it
+// is switched on. Messages name an entry by its 1-based position and never
+// quote it.
+func (v *validator) oauth(s Server) {
+	const at = "server.oauth.clients"
+
+	if s.OAuth.Enabled && s.PublicURL == "" {
+		v.add("server.oauth.enabled", "needs server.public_url")
+	}
+
+	if s.OAuth.Enabled && len(s.OAuth.Clients) == 0 {
+		v.add(at, "must list at least one client when server.oauth.enabled is true")
+	}
+
+	for i, c := range s.OAuth.Clients {
+		n := i + 1
+
+		if slices.Contains(s.OAuth.Clients[:i], c) {
+			v.add(at, "entry %d repeats an earlier entry", n)
+		}
+
+		u, err := url.Parse(c)
+
+		if err != nil {
+			v.add(at, "entry %d is not a URL", n)
+
+			continue
+		}
+
+		switch {
+		case u.Scheme != "https" || u.Hostname() == "":
+			v.add(at, "entry %d must be an absolute https URL with a host", n)
+		case u.User != nil:
+			v.add(at, "entry %d must not contain a username or password", n)
+		case u.RawQuery != "" || u.ForceQuery || strings.Contains(c, "?"):
+			v.add(at, "entry %d must not have a query string", n)
+		case u.Fragment != "" || strings.Contains(c, "#"):
+			v.add(at, "entry %d must not have a fragment", n)
+		case u.Path == "" || u.Path == "/":
+			v.add(at, "entry %d must have a path: a client ID is the URL of its metadata document", n)
+		case !canonicalClientID(c, u):
+			v.add(at, "entry %d is not in canonical form", n)
+		}
+	}
+}
+
+// canonicalClientID reports whether entry, which parsed as u, is the one
+// spelling of its URL a client ID may have: it round-trips through the URL
+// parser, its scheme and host are lowercase, and no path segment is "." or
+// "..". A client ID is compared as a string against what a client presents,
+// so two spellings of one URL must not both be allowed.
+func canonicalClientID(entry string, u *url.URL) bool {
+	if u.String() != entry || u.Scheme != strings.ToLower(u.Scheme) || u.Host != strings.ToLower(u.Host) {
+		return false
+	}
+
+	return !slices.ContainsFunc(strings.Split(u.Path, "/"), func(seg string) bool { return seg == "." || seg == ".." })
 }
 
 func (v *validator) storage(s Storage) {

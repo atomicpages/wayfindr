@@ -9,6 +9,9 @@
 //	    reverse-proxy ADDR to the daemon, adding the client token as a bearer;
 //	    -tls forwards over https with Host set to HOST[:PORT] (a remote
 //	    daemon; the default port 443 is dropped from Host, as a browser would)
+//	conformancekit tunnel -listen IP:PORT -target HOST:PORT -cert-out FILE
+//	    serve https with a throwaway certificate (written to FILE) in front of
+//	    the daemon the way a tunnel is: X-Forwarded-* added, Host kept, no token
 //
 // The proxy exists because the conformance suite has no way to send an
 // Authorization header, while the daemon refuses /mcp without one (design
@@ -51,7 +54,7 @@ func main() {
 
 func run(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: conformancekit freeport | upstream [-version V] | proxy -listen ADDR -target HOST:PORT")
+		return errors.New("usage: conformancekit freeport | upstream [-version V] | proxy -listen ADDR -target HOST:PORT | tunnel -listen IP:PORT -target HOST:PORT -cert-out FILE")
 	}
 
 	switch args[0] {
@@ -77,6 +80,17 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		}
 
 		return serveProxy(ctx, *listen, *target, os.Getenv(clienttoken.EnvVar), *useTLS)
+	case "tunnel":
+		fs := flag.NewFlagSet("tunnel", flag.ContinueOnError)
+		listen := fs.String("listen", "", "loopback ip:port to serve https on")
+		target := fs.String("target", "", "daemon host:port")
+		certOut := fs.String("cert-out", "", "file to write the tunnel's certificate to (PEM)")
+
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+
+		return serveTunnel(ctx, *listen, *target, *certOut)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -147,10 +161,16 @@ func serveProxy(ctx context.Context, listen, target, token string, useTLS bool) 
 // (443): the proxy's own name and port mean nothing to that daemon, and a
 // tunnel routes on the authority the user wrote.
 func newTargetProxy(listen, target, token string, useTLS bool) (http.Handler, error) {
-	_, listenPort, err := net.SplitHostPort(listen)
+	listenHost, listenPort, err := net.SplitHostPort(listen)
 
 	if err != nil {
 		return nil, fmt.Errorf("-listen %q: %w", listen, err)
+	}
+
+	// The proxy adds the bearer token to every request it forwards, so it
+	// must never listen beyond this machine.
+	if ip := net.ParseIP(listenHost); ip == nil || !ip.IsLoopback() {
+		return nil, fmt.Errorf("-listen %q: the host must be a loopback IP address", listen)
 	}
 
 	_, targetPort, err := net.SplitHostPort(target)

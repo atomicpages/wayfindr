@@ -246,3 +246,186 @@ func TestRegistryConcurrent(t *testing.T) {
 		}
 	}
 }
+
+// TestRegistryAddUntil: a token added with AddUntil resolves before its
+// expiry and, judged by the registry's clock, misses at and after it; the
+// expired hit drops the entry and records no touch.
+func TestRegistryAddUntil(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	expires := t0.Add(time.Hour)
+
+	for _, tt := range []struct {
+		name string
+		now  time.Time
+		hit  bool
+	}{
+		{"before", expires.Add(-time.Millisecond), true},
+		{"at", expires, false},
+		{"after", expires.Add(time.Second), false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := clienttoken.Digest("wf_s_access")
+			r := clienttoken.NewRegistry(nil, clock(tt.now, t0))
+			r.AddUntil(d, nightly(), expires)
+
+			got, ok := r.Lookup(d)
+
+			if ok != tt.hit {
+				t.Fatalf("Lookup at %v = %+v, %v; want hit %v", tt.now, got, ok, tt.hit)
+			}
+
+			wantTouches := map[[sha256.Size]byte]time.Time{}
+
+			if tt.hit {
+				if diff := cmp.Diff(nightly(), got); diff != "" {
+					t.Errorf("Lookup (-want +got):\n%s", diff)
+				}
+
+				wantTouches[d] = tt.now
+			}
+
+			if diff := cmp.Diff(wantTouches, r.Touches()); diff != "" {
+				t.Errorf("Touches (-want +got):\n%s", diff)
+			}
+
+			if tt.hit {
+				return
+			}
+
+			// The clock now reads t0, before the expiry: a miss that only
+			// compared times would hit again, so this shows the entry is gone.
+			if c, ok := r.Lookup(d); ok {
+				t.Errorf("Lookup after an expired hit = %+v, want no entry", c)
+			}
+
+			if r.Remove("nightly") {
+				t.Error("Remove after an expired hit = true, want the entry already dropped")
+			}
+		})
+	}
+}
+
+// TestRegistryAddUntilReplacesName: a grant's next access token, added under
+// the same name, stops the previous one, and its own expiry is the one kept.
+func TestRegistryAddUntilReplacesName(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	oldD, newD := clienttoken.Digest("wf_s_old"), clienttoken.Digest("wf_s_new")
+	r := clienttoken.NewRegistry(nil, clock(t0.Add(90*time.Minute)))
+
+	r.AddUntil(oldD, nightly(), t0.Add(time.Hour))
+	r.AddUntil(newD, nightly(), t0.Add(2*time.Hour))
+
+	if _, ok := r.Lookup(oldD); ok {
+		t.Error("the replaced access token still resolves")
+	}
+
+	if _, ok := r.Lookup(newD); !ok {
+		t.Error("the new access token does not resolve before its own expiry")
+	}
+}
+
+// TestRegistryAddClearsExpiry: Add of a digest that AddUntil registered
+// replaces the entry and its expiry, so the token no longer expires.
+func TestRegistryAddClearsExpiry(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	d := clienttoken.Digest("wf_s_nightly")
+	r := clienttoken.NewRegistry(nil, clock(t0.Add(2*time.Hour)))
+
+	r.AddUntil(d, nightly(), t0.Add(time.Hour))
+	r.Add(d, nightly())
+
+	if _, ok := r.Lookup(d); !ok {
+		t.Error("a token re-added with Add still expires")
+	}
+}
+
+// TestRegistryAddUntilAcrossKinds: one name holds one digest whichever way
+// it was added, and Remove drops either kind.
+func TestRegistryAddUntilAcrossKinds(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	tokenD, grantD := clienttoken.Digest("wf_s_token"), clienttoken.Digest("wf_s_grant")
+	r := clienttoken.NewRegistry(nil, clock(t0))
+
+	r.Add(tokenD, nightly())
+	r.AddUntil(grantD, nightly(), t0.Add(time.Hour))
+
+	if _, ok := r.Lookup(tokenD); ok {
+		t.Error("the Add token still resolves after AddUntil took its name")
+	}
+
+	if !r.Remove("nightly") {
+		t.Fatal("Remove of an AddUntil token = false, want true")
+	}
+
+	if _, ok := r.Lookup(grantD); ok {
+		t.Error("the AddUntil token resolves after Remove")
+	}
+
+	r.AddUntil(grantD, nightly(), t0.Add(time.Hour))
+	r.Add(tokenD, nightly())
+
+	if _, ok := r.Lookup(grantD); ok {
+		t.Error("the AddUntil token still resolves after Add took its name")
+	}
+
+	if !r.Remove("nightly") {
+		t.Fatal("Remove of an Add token = false, want true")
+	}
+
+	if _, ok := r.Lookup(tokenD); ok {
+		t.Error("the Add token resolves after Remove")
+	}
+}
+
+// TestRegistryAddUntilHoldsOnlyScopedTokens: AddUntil refuses what Add
+// refuses.
+func TestRegistryAddUntilHoldsOnlyScopedTokens(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	r := clienttoken.NewRegistry(nil, clock(t0))
+
+	for name, c := range map[string]clienttoken.Client{
+		"unlimited": {Name: "nightly"},
+		"named":     {Name: clienttoken.DefaultName, Connectors: []string{"github"}},
+	} {
+		d := clienttoken.Digest("wf_s_" + name)
+		r.AddUntil(d, c, t0.Add(time.Hour))
+
+		if got, ok := r.Lookup(d); ok {
+			t.Errorf("%s: Lookup = %+v, want no hit", name, got)
+		}
+	}
+}
+
+// TestRegistryAddUntilConcurrent exercises AddUntil and expiring Lookups at
+// once; it proves nothing without -race (make race).
+func TestRegistryAddUntilConcurrent(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	r := clienttoken.NewRegistry(nil, clock(t0))
+
+	var wg sync.WaitGroup
+
+	for i := range 8 {
+		wg.Go(func() {
+			name := fmt.Sprintf("g%d", i)
+
+			for j := range 100 {
+				d := clienttoken.Digest(fmt.Sprintf("wf_s_%s_%d", name, j))
+				// Every other token is already expired, so Lookup drops it.
+				exp := t0.Add(time.Duration(j%2) * time.Hour)
+				r.AddUntil(d, clienttoken.Client{Name: name, Connectors: []string{"github"}}, exp)
+				r.Lookup(d)
+				r.Touches()
+			}
+
+			r.Remove(name)
+		})
+	}
+
+	wg.Wait()
+
+	for i := range 8 {
+		if _, ok := r.Lookup(clienttoken.Digest(fmt.Sprintf("wf_s_g%d_99", i))); ok {
+			t.Errorf("g%d still resolves after its Remove", i)
+		}
+	}
+}

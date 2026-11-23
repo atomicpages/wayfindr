@@ -15,6 +15,7 @@ import (
 
 	"github.com/atomicpages/wayfindr/internal/paths"
 	"github.com/atomicpages/wayfindr/internal/secrets"
+	"github.com/atomicpages/wayfindr/internal/selfupdate"
 	"github.com/atomicpages/wayfindr/internal/service"
 	"github.com/atomicpages/wayfindr/internal/setup"
 )
@@ -56,6 +57,35 @@ type Host struct {
 	// RunService runs launchctl or systemctl for `wayfindr service`; nil
 	// means service.ExecRunner.
 	RunService service.Runner
+	// Releases is where `wayfindr update` finds and downloads releases; the
+	// zero value is GitHub.
+	Releases selfupdate.Source
+	// Executable returns the path `wayfindr update` replaces, symlinks
+	// resolved; nil means service.Executable, the running binary.
+	Executable func() (string, error)
+	// Version is the running binary's version as `wayfindr update` compares
+	// it with a release; "" means the one set at build time, so tests can
+	// pick one without assigning the package's version.
+	Version string
+}
+
+// executable is the binary to replace, from Executable or
+// service.Executable.
+func (h Host) executable() (string, error) {
+	if h.Executable != nil {
+		return h.Executable()
+	}
+
+	return service.Executable()
+}
+
+// version is the running binary's version, from Version or the build.
+func (h Host) version() string {
+	if h.Version != "" {
+		return h.Version
+	}
+
+	return version
 }
 
 // workDir is the working directory, from Getwd or os.Getwd.
@@ -172,7 +202,7 @@ func newRootCmd(host Host) *cobra.Command {
 	root.AddCommand(newStatusCmd(host), newCallsCmd(host), newSearchCmd(host), newStdioCmd(host))
 	root.AddCommand(newSecretCmd(host), newServiceCmd(host), newAuthCmd(host), newUICmd(host))
 	root.AddCommand(newConnectorCmd(host), newScopeCmd(host), newTokenCmd(host))
-	root.AddCommand(newConfigCmd(host))
+	root.AddCommand(newConfigCmd(host), newUpdateCmd(host))
 	groupCommands(root)
 
 	return root
@@ -186,7 +216,7 @@ func groupCommands(root *cobra.Command) {
 		id, title string
 		commands  []string
 	}{
-		{"daemon", "Daemon:", []string{"init", "start", "stop", "logs", "service"}},
+		{"daemon", "Daemon:", []string{"init", "start", "stop", "logs", "service", "update"}},
 		{"inspect", "Inspect:", []string{"status", "calls", "search", "scope", "ui"}},
 		{"manage", "Manage:", []string{"connector", "auth", "secret", "token", "config"}},
 		{"plumbing", "Plumbing:", []string{"stdio", "version"}},

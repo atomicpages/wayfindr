@@ -9,12 +9,15 @@ import (
 	"slices"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/atomicpages/wayfindr/internal/store"
 )
 
 // CreateClientToken implements store.Store. ON CONFLICT DO NOTHING covers
-// both the name and the digest, so a conflict on either inserts no row.
-// CreatedAt is truncated to the millisecond, as SQLite stores it.
+// both the name and the digest, so a conflict on either inserts no row, and
+// so does an OAuth grant of the same name. CreatedAt is truncated to the
+// millisecond, as SQLite stores it.
 func (s *Store) CreateClientToken(ctx context.Context, t store.ClientToken) error {
 	if len(t.Connectors) == 0 {
 		return fmt.Errorf("create client token %s: no connectors", t.Name)
@@ -24,8 +27,24 @@ func (s *Store) CreateClientToken(ctx context.Context, t store.ClientToken) erro
 		return fmt.Errorf("create client token %s: no creation time", t.Name)
 	}
 
-	tag, err := s.pool.Exec(ctx, `INSERT INTO client_tokens (user_id, name, digest, connectors, created_at, remote)
-		VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
+	// The name lock makes the check for a grant of that name and the insert
+	// atomic against CreateOAuthGrant, which takes the same lock.
+	tx, err := s.pool.Begin(ctx)
+
+	if err != nil {
+		return fmt.Errorf("create client token %s: %w", t.Name, err)
+	}
+
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := lockName(ctx, tx, t.UserID, t.Name); err != nil {
+		return fmt.Errorf("create client token %s: %w", t.Name, err)
+	}
+
+	tag, err := tx.Exec(ctx, `INSERT INTO client_tokens (user_id, name, digest, connectors, created_at, remote)
+		SELECT $1::uuid, $2::text, $3::bytea, $4::text[], $5::timestamptz, $6::boolean
+		WHERE NOT EXISTS (SELECT 1 FROM oauth_grants WHERE user_id = $1 AND name = $2)
+		ON CONFLICT DO NOTHING`,
 		t.UserID, t.Name, t.Digest[:], t.Connectors, t.CreatedAt.Truncate(time.Millisecond), t.Remote)
 
 	if err != nil {
@@ -36,7 +55,20 @@ func (s *Store) CreateClientToken(ctx context.Context, t store.ClientToken) erro
 		return fmt.Errorf("create client token %s: %w", t.Name, store.ErrExists)
 	}
 
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("create client token %s: commit: %w", t.Name, err)
+	}
+
 	return nil
+}
+
+// lockName takes a transaction-scoped lock on the user's name in the space
+// client tokens and OAuth grants share, so two creates of one name run one
+// after the other and the second sees the first.
+func lockName(ctx context.Context, tx pgx.Tx, userID, name string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text || '/' || $2::text, 0))`, userID, name)
+
+	return err
 }
 
 // ListClientTokens implements store.Store. The "C" collation sorts

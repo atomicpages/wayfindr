@@ -225,6 +225,18 @@ function architectureSidebar() {
           text: "0020 Opt-in usage telemetry",
           link: "/adr/0020-opt-in-usage-telemetry",
         },
+        {
+          text: "0021 Remote client tokens",
+          link: "/adr/0021-remote-client-tokens",
+        },
+        {
+          text: "0022 Authorization server",
+          link: "/adr/0022-authorization-server-for-remote-clients",
+        },
+        {
+          text: "0023 Self-update",
+          link: "/adr/0023-self-update",
+        },
       ],
     },
   ];

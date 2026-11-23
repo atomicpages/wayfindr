@@ -12,8 +12,11 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"net"
+	"net/url"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -71,6 +74,54 @@ type Server struct {
 	// for setup text and to test the connection, and no request is ever
 	// checked against it.
 	PublicURL string `toml:"public_url"`
+	// OAuth is the [server.oauth] table: Wayfindr's authorization server
+	// (ADR 0022). A reload applies it.
+	OAuth OAuth `toml:"oauth"`
+}
+
+// OAuth is the [server.oauth] table: Wayfindr's authorization server for
+// cloud agents that sign in with OAuth (ADR 0022, design §7.11).
+type OAuth struct {
+	// Enabled turns the authorization server on. It needs
+	// Server.PublicURL.
+	Enabled bool `toml:"enabled"`
+	// Clients are the allowed clients: client IDs (CIMD URLs) matched
+	// exactly. Absent means []string{DefaultOAuthClient}.
+	Clients []string `toml:"clients"`
+}
+
+// DefaultOAuthClient is ChatGPT's client ID, the one allowed client when
+// server.oauth.clients is absent.
+const DefaultOAuthClient = "https://chatgpt.com/oauth/client.json"
+
+// Issuer is the authorization server's issuer: PublicURL in the canonical
+// form a client compares it in (RFC 3986 section 6.2.3): scheme and host in
+// lower case, no explicit default port (:443), no trailing slash; "" when
+// PublicURL is "". Every issuer, iss, resource, and metadata URL is built from
+// it, so they agree byte for byte with the URI a client derives from the
+// address. A value that does not parse as an absolute URL, which validation
+// refuses, only loses its trailing slash.
+func (s Server) Issuer() string {
+	u, err := url.Parse(s.PublicURL)
+
+	if err != nil || u.Scheme == "" || u.Hostname() == "" {
+		return strings.TrimSuffix(s.PublicURL, "/")
+	}
+
+	scheme, host, port := strings.ToLower(u.Scheme), strings.ToLower(u.Hostname()), u.Port()
+
+	if scheme == "https" && port == "443" {
+		port = ""
+	}
+
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		// An IPv6 literal keeps its brackets.
+		host = "[" + host + "]"
+	}
+
+	return scheme + "://" + host + strings.TrimSuffix(u.EscapedPath(), "/")
 }
 
 // Storage is the [storage] table. Changing it requires a daemon restart.
@@ -572,6 +623,10 @@ func Parse(data []byte, opts Options) (*Config, error) {
 func applyDefaults(c *Config, md toml.MetaData, dataDir string) {
 	if c.Server.Listen == "" {
 		c.Server.Listen = DefaultListen
+	}
+
+	if !md.IsDefined("server", "oauth", "clients") {
+		c.Server.OAuth.Clients = []string{DefaultOAuthClient}
 	}
 
 	if c.Storage.Driver == "" {

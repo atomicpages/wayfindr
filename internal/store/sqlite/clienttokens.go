@@ -15,7 +15,8 @@ import (
 )
 
 // CreateClientToken implements store.Store. ON CONFLICT DO NOTHING covers
-// both the name and the digest, so a conflict on either inserts no row.
+// both the name and the digest, so a conflict on either inserts no row, and
+// so does an OAuth grant of the same name.
 func (s *Store) CreateClientToken(ctx context.Context, t store.ClientToken) error {
 	if len(t.Connectors) == 0 {
 		return fmt.Errorf("create client token %s: no connectors", t.Name)
@@ -31,8 +32,12 @@ func (s *Store) CreateClientToken(ctx context.Context, t store.ClientToken) erro
 		return fmt.Errorf("create client token %s: %w", t.Name, err)
 	}
 
+	// One statement, so the check for a grant of that name and the insert are
+	// atomic: SQLite holds the write lock from the statement's start.
 	res, err := s.db.ExecContext(ctx, `INSERT INTO client_tokens (user_id, name, digest, connectors, created_at, remote)
-		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+		SELECT ?1, ?2, ?3, ?4, ?5, ?6
+		WHERE NOT EXISTS (SELECT 1 FROM oauth_grants WHERE user_id = ?1 AND name = ?2)
+		ON CONFLICT DO NOTHING`,
 		t.UserID, t.Name, t.Digest[:], string(connectors), t.CreatedAt.UnixMilli(), t.Remote)
 
 	if err != nil {

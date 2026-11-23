@@ -34,11 +34,26 @@ The target builds `bin/wayfindr` and runs `scripts/conformance.sh`, which:
    `Authorization` header, so the proxy adds `Bearer $WAYFINDR_CLIENT_TOKEN`. It
    keeps the `Host` name and `Origin` the suite sent, so the daemon's
    DNS-rebinding guards are still tested.
-5. Waits for `/healthz`, then runs
+5. Waits for `/healthz` (daemon and proxy) and for the tunnel's
+   `/.well-known/oauth-authorization-server` route, then runs
    `npx @modelcontextprotocol/conformance@0.2.0-alpha.12 server --suite all`
    once for each version: 2025-06-18, 2025-11-25, and 2026-07-28.
-6. Stops the daemon and the proxy and removes the temp dir, however the run
-   ends.
+6. Runs the suite's authorization server scenario against the daemon's OAuth
+   authorization server (see below).
+7. Stops the daemon, the proxy, and the tunnel stand-in and removes the temp
+   dir, however the run ends.
+
+The config also sets `[server.oauth] enabled = true` and
+`public_url = "https://127.0.0.1:<port>"`, and step 4 starts a third helper,
+`conformancekit tunnel`, on that port: it serves https with a throwaway
+certificate and forwards to the daemon with `X-Forwarded-*` added, as a tunnel
+does, so the daemon sees a remote request (ADR 0021). The tunnel must keep the
+`Host` the client sent: the daemon admits the public OAuth routes only when
+`Host` equals the issuer's host, or when a loopback `Host` carries a forwarding
+header. The `/mcp` runs above
+still go through the bearer proxy and stay local requests, so they show that
+turning OAuth on changes nothing for a local client. Nothing in the daemon is
+loosened for the test.
 
 Each version has an expected-failures file,
 `scripts/conformance-baseline/<version>.yml`. Every entry names one check,
@@ -65,6 +80,48 @@ guard judges that name.
 ```bash
 CONFORMANCE_URL=http://127.0.0.1:7777/mcp CONFORMANCE_TOKEN="$(cat <data dir>/client-token)" make conformance
 ```
+
+The authorization server step runs only against the throwaway daemon, since it
+needs `[server.oauth]` on.
+
+### What the suite covers of the authorization server (wayfindr-hz7x)
+
+Checked 2026-11-23 for `@modelcontextprotocol/conformance@0.2.0-alpha.12`
+(`list --server`, `list --authorization`, the package's README and `dist`):
+
+- **No resource-server scenarios.** `server` has no scenario for protected
+  resource metadata, the 401 `WWW-Authenticate` challenge, or token
+  validation: its README says the suite defines the MCP server as an OAuth
+  resource server and the client as an OAuth client, but the server list holds
+  only protocol, tools, prompts, resources, header, and task scenarios. Wayfindr's
+  `/mcp` challenge and the two protected resource metadata documents are
+  therefore covered only by its own tests (`internal/httpd`, `internal/oauthserver`).
+- **Two authorization server scenarios**, run with the separate
+  `authorization --url <issuer> --scenario …` command (not `server`). It has
+  no `--expected-failures` option, so `scripts/conformance.sh` takes any check
+  that is not a success as a failure, and there is no baseline file for it.
+  - `authorization-server-metadata-endpoint` runs. It fetches
+    `/.well-known/oauth-authorization-server` under the issuer and checks the
+    status, `Content-Type`, `issuer` (exactly the URL it was given),
+    `authorization_endpoint`, `token_endpoint`, `response_types_supported`,
+    PKCE `S256`, and, as a warning, `client_id_metadata_document_supported`.
+    Against Wayfindr it passes both checks, `authorization-server-metadata` and
+    `authorization-server-metadata-cimd` (2/2, 0 failed, 0 warnings).
+  - `authorization-code-grant` cannot run against Wayfindr, and the script does
+    not run it. It is interactive: it prints an authorization URL for a browser
+    and waits up to 5 minutes for a redirect to
+    `http://127.0.0.1:<port>/callback`, for a `--client-id` already registered
+    with that redirect URI. Wayfindr registers clients by CIMD only, from an
+    allowed https URL that the daemon fetches through a dialer that refuses
+    loopback and private addresses (ADR 0022), so no local client can be
+    registered without weakening the daemon. Consent is also a console page
+    that needs an arm and a console session. Without `--client-id` the
+    scenario reports SKIPPED. What it checks (the redirect, `state`, one `code`,
+    `iss`, and a token response of 200, `application/json`,
+    `Cache-Control: no-store`, `access_token`, `token_type`) is covered by the
+    `internal/oauthserver` and `internal/daemon` tests.
+- The suite has nothing for resource indicators (RFC 8707), PKCE refusals, or
+  dynamic registration on the authorization server side.
 
 ## Automated: `make conformance-client`
 

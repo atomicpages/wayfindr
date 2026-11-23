@@ -8,6 +8,11 @@ reach `/mcp`, with a remote client token only. Amended:
 
 - 2026-11-22 (wayfindr-z5q8): the go-sdk's own localhost `Host` check is turned
   off, so the host guard alone decides which requests are remote.
+- 2026-11-22 (wayfindr-6vz9): when `[server.oauth]` is on, a remote request to
+  `/mcp` without a valid remote token gets 401 with `WWW-Authenticate: Bearer
+  resource_metadata="…"` instead of 404, the authorization server's routes
+  are served to remote requests, and `public_url` is its issuer
+  ([0022](./0022-authorization-server-for-remote-clients)).
 
 ## Context
 
@@ -67,10 +72,20 @@ connector there uses OAuth or no auth.
     foreign request gets today: no token, a wrong or revoked one, the default
     token, or a scoped token that isn't remote. There is no 401 and no
     `WWW-Authenticate`, so a scanner learns nothing about the path, and a
-    client that would start OAuth discovery isn't invited to.
+    client that would start OAuth discovery isn't invited to. (Amended
+    2026-11-22, wayfindr-6vz9: when `[server.oauth]` is on, such a request
+    gets 401 with `WWW-Authenticate: Bearer resource_metadata="…"`, naming
+    `<public_url>/.well-known/oauth-protected-resource/mcp`, and
+    `error="invalid_token"` when it carried a token, so the client can find
+    the authorization server; off, it is still this 404. See
+    [0022](./0022-authorization-server-for-remote-clients).)
   - Every other route is unchanged. `/admin/`, `/ui/`, `/auth/<connector>`, and
     `/healthz` stay loopback-only, and a remote request gets 404 there whatever
     token it carries. `/oauth/callback` is still served for any `Host`.
+    (Amended 2026-11-22, wayfindr-6vz9: when `[server.oauth]` is on, the
+    authorization server's metadata documents, `/oauth/authorize`, and
+    `/oauth/token` are served to a remote request too, with no token;
+    [0022](./0022-authorization-server-for-remote-clients).)
   - A local request is unchanged. A missing or wrong token on `/mcp` still gets
     401 with `WWW-Authenticate: Bearer`.
 - **A tunnel must add a forwarding header** for its requests to count as
@@ -92,7 +107,10 @@ connector there uses OAuth or no auth.
   request against it. The token is what lets a request in, and a tunnel can
   rewrite `Host` anyway. The console uses it for setup text and to test the
   connection. A future authorization server in the daemon would use it as its
-  issuer.
+  issuer. (Amended 2026-11-22, wayfindr-6vz9: when `[server.oauth]` is on, it
+  is that issuer, and `<public_url>/mcp` is the resource every OAuth grant is
+  bound to, so changing it suspends OAuth grants until it is set back;
+  [0022](./0022-authorization-server-for-remote-clients).)
 - `call_tool` keeps no `readOnlyHint` ([0001](./0001-two-meta-tools)). A cloud
   agent may ask before every call. The guide documents what each vendor
   confirms, rather than the tool changing for them.
@@ -102,7 +120,9 @@ connector there uses OAuth or no auth.
 - ChatGPT waits for an OAuth authorization server in the daemon (wayfindr-73at),
   with its own record. Then an unauthenticated remote request to `/mcp` would
   get 401 with `WWW-Authenticate: Bearer resource_metadata=…`, so the client
-  can find the server, instead of 404.
+  can find the server, instead of 404. (Amended 2026-11-22, wayfindr-6vz9:
+  that record is [0022](./0022-authorization-server-for-remote-clients), and
+  the 401 comes only while `[server.oauth]` is on.)
 
 ## Consequences
 

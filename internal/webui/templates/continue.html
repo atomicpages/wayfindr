@@ -1,0 +1,20 @@
+{{define "continue"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Approve a connection · Wayfindr</title>
+<link rel="icon" href="/ui/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/ui/static/app.css">
+</head>
+<body class="login-page">
+<main class="login card">
+  <h1>Wayfindr console</h1>
+  <p>Something asked to connect to Wayfindr. Select Continue to review the request in the console.</p>
+  <p>Continue only if you just selected Connect in an app. If this tab opened without you opening it, or from a link someone sent you, close it instead.</p>
+  <p><a class="btn btn-primary" href="{{.Href}}">Continue</a></p>
+  <p>If you are not signed in, run <code>wayfindr ui</code>, then select Continue again. The request waits until the time the Cloud agents page showed after you selected Connect a client.</p>
+</main>
+</body>
+</html>
+{{end}}

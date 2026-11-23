@@ -46,6 +46,8 @@ type fakeAdmin struct {
 	// statusErr, listErr, and publicURLErr make Status, ListTokens, and
 	// PublicURL fail.
 	statusErr, listErr, publicURLErr error
+	// oauth is the authorization server's side (oauth_test.go).
+	oauth fakeOAuth
 }
 
 func (f *fakeAdmin) PublicURL(context.Context) (admin.PublicURL, error) {

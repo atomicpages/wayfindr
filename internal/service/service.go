@@ -47,10 +47,12 @@ type Options struct {
 	Env paths.Env
 	// Run runs launchctl or systemctl.
 	Run Runner
-	// BeforeLoad, if set, runs once Install has written the unit and just
-	// before it loads it, so nothing it does happens on an OS with no
-	// service manager or when the unit can't be written. The CLI stops a
-	// running daemon there (wayfindr-p9vn). An error stops the install.
+	// BeforeLoad, if set, runs just before Install or Restart loads the
+	// unit: once Install has written it, or once Restart has found it
+	// installed. So nothing it does happens on an OS with no service manager,
+	// when the unit can't be written, or when there is no unit to restart.
+	// The CLI stops a running daemon there (wayfindr-p9vn), so the one the
+	// unit starts takes the lock. An error stops the install or restart.
 	BeforeLoad func(ctx context.Context) error
 }
 
@@ -174,6 +176,51 @@ func Uninstall(ctx context.Context, opts Options) (UninstallResult, error) {
 	}
 
 	return UninstallResult{UnitFile: unitFile, Removed: true}, nil
+}
+
+// Restart reloads an installed unit so the service runs the binary its unit
+// names afresh, as `wayfindr update` needs after replacing that binary in
+// place. It loads the unit rather than stopping the daemon, because neither
+// manager restarts a clean exit (launchd's KeepAlive has SuccessfulExit
+// false, systemd has Restart=on-failure); loading replaces a running unit
+// and starts the new binary. It runs opts.BeforeLoad just before loading, as
+// Install does: a daemon that holds the lock (one started by hand, say)
+// would otherwise make the unit's new daemon find it running and exit
+// cleanly, which neither manager restarts. It reports false, and runs
+// nothing, when no unit file is installed or the OS has no supported
+// service manager (Windows): there is no service to restart.
+func Restart(ctx context.Context, opts Options) (bool, error) {
+	m, err := manager(opts)
+
+	if errors.Is(err, ErrUnsupported) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+
+	unitFile, err := m.unitFile(opts.Env)
+
+	if err != nil {
+		return false, err
+	}
+
+	if _, err := os.Stat(unitFile); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("check %s: %w", unitFile, err)
+	}
+
+	if opts.BeforeLoad != nil {
+		if err := opts.BeforeLoad(ctx); err != nil {
+			return false, err
+		}
+	}
+
+	if err := m.load(ctx, unitFile); err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 // unit is what the unit file runs.

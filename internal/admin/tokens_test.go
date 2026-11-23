@@ -32,6 +32,7 @@ var created = time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
 type fakeTokens struct {
 	mu      sync.Mutex
 	tokens  []store.ClientToken
+	grants  []store.OAuthGrant
 	creates [][]string
 	remotes []bool
 	err     error
@@ -64,12 +65,25 @@ func (f *fakeTokens) List(context.Context) ([]store.ClientToken, error) {
 	return slices.Clone(f.tokens), f.err
 }
 
+func (f *fakeTokens) ListGrants(context.Context) ([]store.OAuthGrant, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return slices.Clone(f.grants), f.err
+}
+
 func (f *fakeTokens) Revoke(_ context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	if f.err != nil {
 		return f.err
+	}
+
+	if g := slices.IndexFunc(f.grants, func(g store.OAuthGrant) bool { return g.Name == name }); g >= 0 {
+		f.grants = slices.Delete(f.grants, g, g+1)
+
+		return nil
 	}
 
 	i := slices.IndexFunc(f.tokens, func(t store.ClientToken) bool { return t.Name == name })
@@ -213,7 +227,7 @@ func TestCreateTokenRefusals(t *testing.T) {
 		{"connectors missing", `{"name":"nightly"}`, 400, "a client token needs at least one connector", false},
 		{"unknown connector", `{"name":"nightly","connectors":["github","gmail"]}`, 400,
 			`no connector is called "gmail"; configured: github, linear, slack`, false},
-		{"name taken", `{"name":"taken","connectors":["github"]}`, 409, `a client token called "taken" already exists`, true},
+		{"name taken", `{"name":"taken","connectors":["github"]}`, 409, `a client token or OAuth grant called "taken" already exists`, true},
 	}
 
 	for _, tt := range tests {
@@ -264,8 +278,8 @@ func TestListTokensNeverHoldsAValue(t *testing.T) {
 
 	// last_used_at is absent for a token never used, and every time is UTC.
 	want := `{"tokens":[` +
-		`{"name":"nightly-triage","connectors":["github","linear"],"remote":false,"created_at":"2026-11-08T10:00:00Z"},` +
-		`{"name":"used","connectors":["slack"],"remote":false,"created_at":"2026-11-08T10:00:00Z","last_used_at":"2026-11-08T20:00:04Z"}` +
+		`{"name":"nightly-triage","kind":"token","connectors":["github","linear"],"remote":false,"created_at":"2026-11-08T10:00:00Z"},` +
+		`{"name":"used","kind":"token","connectors":["slack"],"remote":false,"created_at":"2026-11-08T10:00:00Z","last_used_at":"2026-11-08T20:00:04Z"}` +
 		`]}` + "\n"
 
 	if diff := cmp.Diff(want, string(body)); diff != "" {
@@ -280,12 +294,58 @@ func TestListTokensNeverHoldsAValue(t *testing.T) {
 
 	usedUTC := used.UTC()
 	wantList := admin.TokenList{Tokens: []admin.Token{
-		{Name: "nightly-triage", Connectors: []string{"github", "linear"}, CreatedAt: created},
-		{Name: "used", Connectors: []string{"slack"}, CreatedAt: created, LastUsedAt: &usedUTC},
+		{Name: "nightly-triage", Kind: admin.TokenKindToken, Connectors: []string{"github", "linear"}, CreatedAt: created},
+		{Name: "used", Kind: admin.TokenKindToken, Connectors: []string{"slack"}, CreatedAt: created, LastUsedAt: &usedUTC},
 	}}
 
 	if diff := cmp.Diff(wantList, got); diff != "" {
 		t.Errorf("ListTokens (-want +got):\n%s", diff)
+	}
+}
+
+func TestListTokensMergesOAuthGrantsByName(t *testing.T) {
+	used := time.Date(2026, 11, 9, 1, 0, 0, 0, time.FixedZone("x", 3600))
+	f := &fakeTokens{
+		tokens: []store.ClientToken{
+			{Name: "ci", Connectors: []string{"github"}, CreatedAt: created},
+			{Name: "zeta", Connectors: []string{"slack"}, CreatedAt: created},
+		},
+		grants: []store.OAuthGrant{{
+			Name: "chatgpt", ClientID: "https://chatgpt.com/oauth/client.json", Resource: "https://wf.example/mcp",
+			Connectors: []string{"github", "linear"}, CreatedAt: created, LastUsedAt: &used,
+		}},
+	}
+	c, srv := serveTokens(t, f)
+
+	code, body := get(t, srv, srv.URL+"/admin/tokens")
+
+	if code != http.StatusOK {
+		t.Fatalf("GET /admin/tokens = %d, want 200; body: %s", code, body)
+	}
+
+	// A grant is remote, names its client, and lists beside the tokens, by name.
+	want := `{"tokens":[` +
+		`{"name":"chatgpt","kind":"oauth","connectors":["github","linear"],"client":"https://chatgpt.com/oauth/client.json","remote":true,"created_at":"2026-11-08T10:00:00Z","last_used_at":"2026-11-09T00:00:00Z"},` +
+		`{"name":"ci","kind":"token","connectors":["github"],"remote":false,"created_at":"2026-11-08T10:00:00Z"},` +
+		`{"name":"zeta","kind":"token","connectors":["slack"],"remote":false,"created_at":"2026-11-08T10:00:00Z"}` +
+		`]}` + "\n"
+
+	if diff := cmp.Diff(want, string(body)); diff != "" {
+		t.Errorf("body (-want +got):\n%s", diff)
+	}
+
+	if _, err := c.RevokeToken(t.Context(), "chatgpt"); err != nil {
+		t.Fatalf("RevokeToken of a grant: %v", err)
+	}
+
+	got, err := c.ListTokens(t.Context())
+
+	if err != nil {
+		t.Fatalf("ListTokens: %v", err)
+	}
+
+	if len(got.Tokens) != 2 || got.Tokens[0].Name != "ci" {
+		t.Errorf("tokens after revoking the grant = %+v, want ci and zeta", got.Tokens)
 	}
 }
 
@@ -313,7 +373,7 @@ func TestRevokeToken(t *testing.T) {
 
 	_, err = c.RevokeToken(t.Context(), "nightly")
 
-	if statusOf(err) != http.StatusNotFound || !strings.Contains(err.Error(), `no client token is called "nightly"`) {
+	if statusOf(err) != http.StatusNotFound || !strings.Contains(err.Error(), `no client token or OAuth grant is called "nightly"`) {
 		t.Errorf("second RevokeToken = %v, want 404 saying there is no such token", err)
 	}
 }

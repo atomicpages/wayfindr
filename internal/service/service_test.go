@@ -489,3 +489,174 @@ func TestInstallRunsBeforeLoadJustBeforeLoading(t *testing.T) {
 		}
 	})
 }
+
+// Restart reloads an installed unit with the same commands Install loads it
+// with, so the service runs the binary that `wayfindr update` swapped in.
+func TestRestartReloadsAnInstalledUnit(t *testing.T) {
+	unixHost(t)
+
+	cases := []struct {
+		goos string
+		want []string
+	}{
+		{
+			goos: "darwin",
+			want: []string{
+				launchdPrint,
+				"launchctl bootout gui/501/dev.wayfindr.daemon",
+				"launchctl enable gui/501/dev.wayfindr.daemon",
+				"launchctl bootstrap gui/501 " + plistFile,
+			},
+		},
+		{
+			goos: "linux",
+			want: []string{
+				"systemctl --user daemon-reload",
+				"systemctl --user enable wayfindr.service",
+				"systemctl --user restart wayfindr.service",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.goos, func(t *testing.T) {
+			m := newMachine(t)
+
+			if _, err := service.Install(context.Background(), m.options(tc.goos)); err != nil {
+				t.Fatal(err)
+			}
+
+			m.ran = nil
+
+			restarted, err := service.Restart(context.Background(), m.options(tc.goos))
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !restarted {
+				t.Error("restarted = false, want true")
+			}
+
+			if diff := cmp.Diff(tc.want, m.ran); diff != "" {
+				t.Errorf("commands differ (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// With no unit installed, or on an OS with no service manager, there is no
+// service to restart: Restart reports false and runs nothing.
+func TestRestartWithNoUnitDoesNothing(t *testing.T) {
+	for _, goos := range []string{"darwin", "linux", "windows"} {
+		t.Run(goos, func(t *testing.T) {
+			if goos != "windows" {
+				unixHost(t)
+			}
+
+			m := newMachine(t)
+
+			restarted, err := service.Restart(context.Background(), m.options(goos))
+
+			if err != nil || restarted {
+				t.Errorf("Restart = %v, %v; want false, nil", restarted, err)
+			}
+
+			if len(m.ran) != 0 {
+				t.Errorf("ran %q, want no commands", m.ran)
+			}
+		})
+	}
+}
+
+func TestRestartFailsWhenTheServiceManagerRefuses(t *testing.T) {
+	unixHost(t)
+
+	m := newMachine(t)
+
+	if _, err := service.Install(context.Background(), m.options("linux")); err != nil {
+		t.Fatal(err)
+	}
+
+	refused := errors.New("exit status 1: Failed to restart wayfindr.service")
+	m.fail = map[string]error{"systemctl --user restart wayfindr.service": refused}
+
+	restarted, err := service.Restart(context.Background(), m.options("linux"))
+
+	if !errors.Is(err, refused) || restarted {
+		t.Errorf("Restart = %v, %v; want false and the runner's error", restarted, err)
+	}
+}
+
+// Restart runs BeforeLoad just before it loads the unit, as Install does, so
+// the CLI can stop a daemon holding the lock that the unit's new daemon
+// would otherwise find running and exit on (wayfindr-p9vn). With no unit to
+// restart it runs nothing, the hook included.
+func TestRestartRunsBeforeLoadJustBeforeLoading(t *testing.T) {
+	for _, goos := range []string{"darwin", "linux", "windows"} {
+		t.Run(goos+" without a unit", func(t *testing.T) {
+			if goos != "windows" {
+				unixHost(t)
+			}
+
+			m := newMachine(t)
+			opts := m.options(goos)
+			called := false
+			opts.BeforeLoad = func(context.Context) error { called = true; return nil }
+
+			if restarted, err := service.Restart(context.Background(), opts); err != nil || restarted || called {
+				t.Errorf("Restart = %v, %v, BeforeLoad called = %v; want false, nil, and no call", restarted, err, called)
+			}
+		})
+	}
+
+	for _, goos := range []string{"darwin", "linux"} {
+		t.Run(goos, func(t *testing.T) {
+			unixHost(t)
+
+			m := newMachine(t)
+
+			if _, err := service.Install(context.Background(), m.options(goos)); err != nil {
+				t.Fatal(err)
+			}
+
+			m.ran = nil
+			opts := m.options(goos)
+			ranBefore := -1
+			opts.BeforeLoad = func(context.Context) error {
+				ranBefore = len(m.ran)
+
+				return nil
+			}
+
+			restarted, err := service.Restart(context.Background(), opts)
+
+			if err != nil || !restarted {
+				t.Fatalf("Restart = %v, %v; want true, nil", restarted, err)
+			}
+
+			if ranBefore != 0 || len(m.ran) == 0 {
+				t.Errorf("BeforeLoad ran after %d commands, then %q ran; want it before any, then the load", ranBefore, m.ran)
+			}
+		})
+	}
+
+	t.Run("its error stops the restart", func(t *testing.T) {
+		unixHost(t)
+
+		m := newMachine(t)
+
+		if _, err := service.Install(context.Background(), m.options("linux")); err != nil {
+			t.Fatal(err)
+		}
+
+		m.ran = nil
+		opts := m.options("linux")
+		stop := errors.New("stop failed")
+		opts.BeforeLoad = func(context.Context) error { return stop }
+
+		if restarted, err := service.Restart(context.Background(), opts); !errors.Is(err, stop) || restarted || len(m.ran) != 0 {
+			t.Errorf("Restart = %v, %v after %q; want false, the hook's error, and no command", restarted, err, m.ran)
+		}
+	})
+}

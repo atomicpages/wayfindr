@@ -27,6 +27,7 @@ const scopedValue = "wf_s_cli-test-value" //nolint:gosec // G101: a test fixture
 type fakeTokens struct {
 	mu     sync.Mutex
 	tokens []store.ClientToken
+	grants []store.OAuthGrant
 }
 
 func (f *fakeTokens) Create(_ context.Context, name string, connectors []string, remote bool) (store.ClientToken, string, error) {
@@ -50,9 +51,23 @@ func (f *fakeTokens) List(context.Context) ([]store.ClientToken, error) {
 	return slices.Clone(f.tokens), nil
 }
 
+func (f *fakeTokens) ListGrants(context.Context) ([]store.OAuthGrant, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return slices.Clone(f.grants), nil
+}
+
 func (f *fakeTokens) Revoke(_ context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	if g := slices.IndexFunc(f.grants, func(g store.OAuthGrant) bool { return g.Name == name }); g >= 0 {
+		f.grants = slices.Delete(f.grants, g, g+1)
+
+		return nil
+	}
+
 	i := slices.IndexFunc(f.tokens, func(t store.ClientToken) bool { return t.Name == name })
 
 	if i < 0 {
@@ -149,9 +164,9 @@ func TestTokenCreateRemoteIsStoredAndListed(t *testing.T) {
 		t.Fatalf("list: exit code = %d; stderr: %s", code, stderr)
 	}
 
-	wantList := "NAME   CONNECTORS  REMOTE  CREATED               LAST USED\n" +
-		"grok   github      yes     2026-11-08T10:00:00Z  -\n" +
-		"local  github      no      2026-11-08T10:00:00Z  -\n"
+	wantList := "NAME   KIND   CONNECTORS  REMOTE  CREATED               LAST USED\n" +
+		"grok   token  github      yes     2026-11-08T10:00:00Z  -\n" +
+		"local  token  github      no      2026-11-08T10:00:00Z  -\n"
 
 	if diff := cmp.Diff(wantList, stdout); diff != "" {
 		t.Errorf("list (-want +got):\n%s", diff)
@@ -195,9 +210,9 @@ func TestTokenListNeverPrintsAValue(t *testing.T) {
 		t.Fatalf("list: exit code = %d, want 0; stderr: %s", code, stderr)
 	}
 
-	want := "NAME            CONNECTORS      REMOTE  CREATED               LAST USED\n" +
-		"nightly-triage  github, linear  no      2026-11-08T10:00:00Z  2026-11-08T22:00:04Z\n" +
-		"ci              github, linear  no      2026-11-08T10:00:00Z  -\n"
+	want := "NAME            KIND   CONNECTORS      REMOTE  CREATED               LAST USED\n" +
+		"nightly-triage  token  github, linear  no      2026-11-08T10:00:00Z  2026-11-08T22:00:04Z\n" +
+		"ci              token  github, linear  no      2026-11-08T10:00:00Z  -\n"
 
 	if diff := cmp.Diff(want, stdout); diff != "" {
 		t.Errorf("list (-want +got):\n%s", diff)
@@ -209,7 +224,7 @@ func TestTokenListNeverPrintsAValue(t *testing.T) {
 		t.Fatalf("list --json: exit code = %d, want 0; stderr: %s", code, stderr)
 	}
 
-	if strings.Contains(stdout, scopedValue) || strings.Contains(stdout, `"token"`) {
+	if strings.Contains(stdout, scopedValue) || strings.Contains(stdout, `"token":`) {
 		t.Errorf("list --json holds a token value:\n%s", stdout)
 	}
 
@@ -221,6 +236,59 @@ func TestTokenListNeverPrintsAValue(t *testing.T) {
 
 	if len(got.Tokens) != 2 || got.Tokens[0].LastUsedAt == nil || got.Tokens[1].LastUsedAt != nil {
 		t.Errorf("list --json = %+v, want both tokens, only the first used", got)
+	}
+}
+
+func TestTokenListShowsOAuthGrantsWithTheirClientHost(t *testing.T) {
+	f := &fakeTokens{
+		tokens: []store.ClientToken{{Name: "ci", Connectors: []string{"github"}, CreatedAt: time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)}},
+		grants: []store.OAuthGrant{{
+			Name: "chatgpt", ClientID: "https://chatgpt.com/oauth/client.json", Connectors: []string{"github", "linear"},
+			CreatedAt: time.Date(2026, 11, 9, 8, 30, 0, 0, time.UTC),
+		}},
+	}
+	host := tokenHost(t, f)
+
+	code, stdout, stderr := runToken(t, host, "list")
+
+	if code != 0 {
+		t.Fatalf("list: exit code = %d, want 0; stderr: %s", code, stderr)
+	}
+
+	want := "NAME     KIND                 CONNECTORS      REMOTE  CREATED               LAST USED\n" +
+		"chatgpt  oauth (chatgpt.com)  github, linear  yes     2026-11-09T08:30:00Z  -\n" +
+		"ci       token                github          no      2026-11-08T10:00:00Z  -\n"
+
+	if diff := cmp.Diff(want, stdout); diff != "" {
+		t.Errorf("list (-want +got):\n%s", diff)
+	}
+
+	code, stdout, stderr = runToken(t, host, "list", "--json")
+
+	if code != 0 {
+		t.Fatalf("list --json: exit code = %d, want 0; stderr: %s", code, stderr)
+	}
+
+	var got admin.TokenList
+
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("list --json is not a TokenList: %v\n%s", err, stdout)
+	}
+
+	if len(got.Tokens) != 2 || got.Tokens[0].Kind != admin.TokenKindOAuth || got.Tokens[0].Client != "https://chatgpt.com/oauth/client.json" || got.Tokens[1].Kind != admin.TokenKindToken {
+		t.Errorf("list --json = %+v, want the grant (oauth, with its client) then the token", got.Tokens)
+	}
+
+	if code, _, stderr := runToken(t, host, "revoke", "chatgpt"); code != 0 {
+		t.Fatalf("revoke of a grant: exit code = %d, want 0; stderr: %s", code, stderr)
+	}
+
+	f.mu.Lock()
+	left := len(f.grants)
+	f.mu.Unlock()
+
+	if left != 0 {
+		t.Errorf("grants after revoke = %d, want 0", left)
 	}
 }
 
@@ -250,13 +318,13 @@ func TestTokenRevoke(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0; stderr: %s", code, stderr)
 	}
 
-	if diff := cmp.Diff("Revoked client token nightly. Clients using it are refused from now on.\n", stdout); diff != "" {
+	if diff := cmp.Diff("Revoked nightly. Clients using it are refused from now on.\n", stdout); diff != "" {
 		t.Errorf("stdout (-want +got):\n%s", diff)
 	}
 
 	code, stdout, stderr = runToken(t, host, "revoke", "nightly")
 
-	if code == 0 || stdout != "" || !strings.Contains(stderr, `no client token is called "nightly"`) {
+	if code == 0 || stdout != "" || !strings.Contains(stderr, `no client token or OAuth grant is called "nightly"`) {
 		t.Errorf("second revoke = %d, stdout %q, stderr %q; want an error saying there is no such token", code, stdout, stderr)
 	}
 }

@@ -38,18 +38,19 @@ wayfindr auth login linear    # authorize an OAuth connector
 | [`wayfindr secret list`](#wayfindr-secret-list)                    | List stored secrets and what refers to each, never their values.                     | Yes, 10 s                                              |
 | [`wayfindr secret remove <name>`](#wayfindr-secret-remove)         | Delete a stored secret.                                                              | Yes, 90 s                                              |
 | [`wayfindr token create <name>`](#wayfindr-token-create)           | Create a scoped client token and print it once.                                      | Yes, 10 s                                              |
-| [`wayfindr token list`](#wayfindr-token-list)                      | List scoped client tokens, never their values. Alias: `token ls`.                    | Yes, 10 s                                              |
-| [`wayfindr token revoke <name>`](#wayfindr-token-revoke)           | Delete a scoped client token.                                                        | Yes, 10 s                                              |
+| [`wayfindr token list`](#wayfindr-token-list)                      | List scoped client tokens and OAuth grants, never their values. Alias: `token ls`.   | Yes, 10 s                                              |
+| [`wayfindr token revoke <name>`](#wayfindr-token-revoke)           | Delete a scoped client token or an OAuth grant.                                      | Yes, 10 s                                              |
 | [`wayfindr config path`](#wayfindr-config-path)                    | Print the config file and data directory every command uses.                         | No                                                     |
 | [`wayfindr config check`](#wayfindr-config-check)                  | Check the config file as the daemon would load it.                                   | No; reads the config file only                         |
 | [`wayfindr service install`](#wayfindr-service-install)            | Run the daemon at login (launchd or systemd).                                        | No                                                     |
 | [`wayfindr service uninstall`](#wayfindr-service-uninstall)        | Stop and remove the login service.                                                   | No                                                     |
+| [`wayfindr update [version]`](#wayfindr-update)                    | Install the latest release, or the one you name, and restart the daemon.             | No; restarts one that runs, unless `--no-restart`      |
 | [`wayfindr version`](#wayfindr-version)                            | Print the version, commit, and Go version.                                           | No                                                     |
 | [`wayfindr completion <shell>`](#wayfindr-completion)              | Print a shell completion script.                                                     | No                                                     |
 | `wayfindr help [command]`                                          | Print help for a command. Same as `--help`.                                          | No                                                     |
 
 `wayfindr --help` lists the commands in four groups: **Daemon** (`init`,
-`start`, `stop`, `logs`, `service`), **Inspect** (`status`, `calls`, `search`,
+`start`, `stop`, `logs`, `service`, `update`), **Inspect** (`status`, `calls`, `search`,
 `scope`, `ui`), **Manage** (`connector`, `auth`, `secret`, `token`,
 `config`), and **Plumbing** (`stdio`, `completion`, `version`, `help`).
 
@@ -58,13 +59,13 @@ wayfindr auth login linear    # authorize an OAuth connector
 These go before or after the command, as in `wayfindr --json status` or
 `wayfindr status --json`.
 
-| Flag                  | Default | Description                                                                                                                                                                                                                                                                                 |
-| --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--config <path>`     | none    | The [config file](./paths-and-environment#config-file). Wins over `WAYFINDR_CONFIG`.                                                                                                                                                                                                        |
-| `--data-dir <path>`   | none    | The [data directory](./paths-and-environment#data-directory). Wins over `WAYFINDR_DATA_DIR`.                                                                                                                                                                                                |
-| `--log-level <level>` | `info`  | Log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`, or `disabled`. Case-insensitive; numbers are not accepted.                                                                                                                                                          |
-| `--json`              | `false` | Print the result as JSON instead of text. Only the commands that print data take it: `status`, `calls`, `search`, `scope`, `connector list`, `connector tools`, `secret list`, `token list`, `config path`, and `version`. Each one's section says what it prints. Any other command fails. |
-| `-h`, `--help`        |         | Print the command's help and exit.                                                                                                                                                                                                                                                          |
+| Flag                  | Default | Description                                                                                                                                                                                                                                                                                                   |
+| --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--config <path>`     | none    | The [config file](./paths-and-environment#config-file). Wins over `WAYFINDR_CONFIG`.                                                                                                                                                                                                                          |
+| `--data-dir <path>`   | none    | The [data directory](./paths-and-environment#data-directory). Wins over `WAYFINDR_DATA_DIR`.                                                                                                                                                                                                                  |
+| `--log-level <level>` | `info`  | Log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`, or `disabled`. Case-insensitive; numbers are not accepted.                                                                                                                                                                            |
+| `--json`              | `false` | Print the result as JSON instead of text. Only the commands that print data take it: `status`, `calls`, `search`, `scope`, `connector list`, `connector tools`, `secret list`, `token list`, `config path`, `version`, and `update --check`. Each one's section says what it prints. Any other command fails. |
+| `-h`, `--help`        |         | Print the command's help and exit.                                                                                                                                                                                                                                                                            |
 
 `--config` and `--data-dir` act as if `WAYFINDR_CONFIG` and `WAYFINDR_DATA_DIR`
 were set to them. A relative path is taken from the working directory. The
@@ -88,7 +89,8 @@ only the arguments its row in the table above shows.
 - The exit code is `0` on success and `1` on any error, including a bad flag, a
   wrong number of arguments, and an unknown command or subcommand.
   [`status --check`](#wayfindr-status) also exits `2`, without an `Error:`
-  line, when a connector or the config needs attention. An unknown
+  line, when a connector or the config needs attention, and
+  [`update --check`](#wayfindr-update) does when a newer release exists. An unknown
   command also prints a suggestion when one is close, then
   `Run 'wayfindr --help' for usage.` (for a subcommand, the group's own
   `--help`, such as `wayfindr connector --help`).
@@ -1599,7 +1601,7 @@ can also reach `/mcp` through a tunnel, for a
 [cloud agent](../guide/cloud-agents).
 
 - [`wayfindr token create`](#wayfindr-token-create): create one and print it once.
-- [`wayfindr token list`](#wayfindr-token-list): list them, never their values.
+- [`wayfindr token list`](#wayfindr-token-list): list them and the OAuth grants, never their values.
 - [`wayfindr token revoke`](#wayfindr-token-revoke): delete one.
 
 Each subcommand calls the running daemon's admin API with the default client
@@ -1614,11 +1616,12 @@ wf_s_6kq1…
 This is the only time it is shown; store it where the client can read it.
 
 $ wayfindr token list
-NAME            CONNECTORS      REMOTE  CREATED               LAST USED
-nightly-triage  github, linear  no      2026-11-08T10:00:00Z  2026-11-08T22:00:04Z
+NAME            KIND                 CONNECTORS      REMOTE  CREATED               LAST USED
+chatgpt         oauth (chatgpt.com)  github          yes     2026-11-09T08:30:00Z  2026-11-09T09:12:41Z
+nightly-triage  token                github, linear  no      2026-11-08T10:00:00Z  2026-11-08T22:00:04Z
 
 $ wayfindr token revoke nightly-triage
-Revoked client token nightly-triage. Clients using it are refused from now on.
+Revoked nightly-triage. Clients using it are refused from now on.
 ```
 
 A token for a cloud agent is made the same way, with `--remote`:
@@ -1672,47 +1675,54 @@ exists, or a connector isn't configured. The daemon's reason is the error.
 
 ### `wayfindr token list`
 
-List the scoped client tokens, sorted by name. Values are never printed; the
-daemon doesn't have them. The default client token is not listed.
-`wayfindr token ls` is the same command.
+List the scoped client tokens and the OAuth grants that cloud agents signed in
+with, sorted by name. Values are never printed; the daemon doesn't have them.
+The default client token is not listed. `wayfindr token ls` is the same
+command.
 
 The columns are:
 
-- **CONNECTORS** are the connectors the token can use, as created. A connector
-  removed from the config since is still listed.
+- **KIND** is `token` for a scoped client token, and `oauth (<host>)` for an
+  OAuth grant, where `<host>` is the host of the client that holds it, such as
+  `chatgpt.com`.
+- **CONNECTORS** are the connectors the token or grant can use, as created. A
+  connector removed from the config since is still listed.
 - **REMOTE** is `yes` for a token created with `--remote`, `no` otherwise. Only
-  a `yes` token gets through a tunnel.
-- **LAST USED** is when a client last presented the token, or `-` if none has.
-  The daemon writes it to the store at most once a minute, and when it stops, so
-  it can lag by up to a minute.
+  a `yes` token gets through a tunnel. An OAuth grant is always `yes`.
+- **LAST USED** is when a client last presented the token, or the grant's
+  access token, or `-` if none has. The daemon writes it to the store at most
+  once a minute, and when it stops, so it can lag by up to a minute.
 
-With no scoped tokens it prints
+With no scoped tokens or grants it prints
 ``No scoped client tokens. Create one with `wayfindr token create <name> --connector <connector>`.``
 
 **`--json`** prints the daemon's response:
 
-| Field                   | Meaning                                                                |
-| ----------------------- | ---------------------------------------------------------------------- |
-| `tokens[].name`         | The token's name.                                                      |
-| `tokens[].connectors`   | The connectors it can use, as created.                                 |
-| `tokens[].remote`       | `true` if it was created with `--remote`, else `false`.                |
-| `tokens[].created_at`   | When it was created.                                                   |
-| `tokens[].last_used_at` | When a client last presented it. Absent until the token is first used. |
+| Field                   | Meaning                                                                      |
+| ----------------------- | ---------------------------------------------------------------------------- |
+| `tokens[].name`         | The token's or grant's name.                                                 |
+| `tokens[].kind`         | `token` for a scoped client token, `oauth` for an OAuth grant.               |
+| `tokens[].connectors`   | The connectors it can use, as created.                                       |
+| `tokens[].client`       | An OAuth grant's client ID. Absent for a token.                              |
+| `tokens[].remote`       | `true` if it was created with `--remote` or is an OAuth grant, else `false`. |
+| `tokens[].created_at`   | When it was created.                                                         |
+| `tokens[].last_used_at` | When a client last presented it. Absent until the token is first used.       |
 
 `tokens` is always an array.
 
 ### `wayfindr token revoke`
 
-Delete a scoped client token, by name.
+Delete a scoped client token or an OAuth grant, by name. A grant's access and
+refresh tokens go with it, so its client has to ask for access again.
 
 **Prints**
-`Revoked client token <name>. Clients using it are refused from now on.` From
+`Revoked <name>. Clients using it are refused from now on.` From
 their next request on, clients that present it get `401`, with no restart (`404`
 for a request that comes through a tunnel). Calls already logged keep its name in
 the call log.
 
-**Exit:** `0` once deleted. `1` when no scoped token has that name: the daemon's
-sentence.
+**Exit:** `0` once deleted. `1` when no scoped token or OAuth grant has that
+name: the daemon's sentence.
 
 ## `wayfindr config`
 
@@ -1834,6 +1844,149 @@ Stop and remove the login service.
 **Prints** `Stopped the daemon and removed <unit file>`, or, with nothing
 installed, `No service installed (<unit file> not found); nothing to do.` Both
 exit `0`.
+
+## `wayfindr update`
+
+```
+wayfindr update [version] [--check] [--no-restart]
+```
+
+Replace this binary with the latest release, or with the one you name, then
+restart the daemon so it runs the new code. It downloads from
+[GitHub Releases](https://github.com/atomicpages/wayfindr/releases) and checks
+the archive the way the [installer](../guide/installation) does. It doesn't
+need a running daemon.
+
+```text
+$ wayfindr update
+Updated wayfindr v0.1.0 → v0.2.0 at /Users/you/.local/bin/wayfindr
+```
+
+| Flag           | Default | Description                                                                                                       |
+| -------------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `--check`      | `false` | Print how this version compares with the latest release, and exit `2` when the release is newer. Install nothing. |
+| `--no-restart` | `false` | Replace the binary, but leave the daemon and the login service as they are.                                       |
+
+**Which release.** Without an argument, `update` asks GitHub for the latest
+release, which skips pre-releases and drafts, as the installer does. Then it
+compares that with this binary's version:
+
+- The same version: it prints `wayfindr v0.2.0 is up to date` and changes
+  nothing.
+- This binary is newer: it prints
+  `wayfindr v0.2.0-3-ga6fe2cf is newer than v0.2.0` and changes nothing.
+- A build that prints `dev` in [`wayfindr version`](#wayfindr-version), or a
+  bare commit such as `a6fe2cf` (built from a checkout with no release tags),
+  counts as older than any release.
+- A build between releases, such as `v0.1.0-3-ga6fe2cf`, counts as newer than
+  `v0.1.0`, so it updates only once a later release is out.
+
+With a version, such as `wayfindr update v0.1.0` (the `v` is optional), it
+installs exactly that release, a pre-release such as `v0.3.0-rc.1` or an older
+one included. The version must be a full one: `wayfindr update 0.2` fails with
+`invalid version "0.2": want a semantic version such as v0.2.0`. If it is the
+version this binary already is, `update` prints
+`wayfindr v0.2.0 is already installed; nothing to do`. When it is older, a note
+follows the `Updated` line, because an older binary refuses a store that a newer
+one has migrated (see [Upgrades and downgrades](../guide/storage#upgrades-and-downgrades)):
+
+```text
+$ wayfindr update v0.1.0
+Updated wayfindr v0.2.0 → v0.1.0 at /Users/you/.local/bin/wayfindr
+Note: v0.1.0 is older than v0.2.0. An older binary can't open a store that a newer one has migrated: https://atomicpages.github.io/wayfindr/guide/storage#upgrades-and-downgrades
+```
+
+**How it installs.** It picks the archive for this OS and CPU,
+`wayfindr-<os>-<arch>.tar.gz` (`.zip` on Windows). An Intel binary running under
+Rosetta on Apple silicon gets the `arm64` one, as the installer does. It
+downloads the archive and the release's `checksums.txt`, and checks the
+archive's SHA-256. If the checksum doesn't match, or the archive isn't listed,
+nothing is written. Then it replaces the running executable in place. A symlink
+is followed, so the file it points to is replaced and the link is kept. On
+Windows, the running `wayfindr.exe` is renamed to `wayfindr.exe.old` first, as
+the installer does, and old leftovers are removed on the next update.
+
+`update` uses the GitHub release only. It doesn't read `WAYFINDR_DOWNLOAD_URL`;
+to install from a mirror, run the installer. The checksum catches a corrupted
+download. To check build provenance as well, verify the archive with
+`gh attestation verify`, as in [Download by hand](../guide/installation#download-by-hand).
+
+**Restart.** A running daemon keeps the old binary until it restarts. After the
+binary is replaced, and unless you pass `--no-restart`, `update`:
+
+1. Restarts the [login service](#wayfindr-service-install), if one is installed,
+   and prints `Restarted the login service.` As
+   [`service install`](#wayfindr-service-install) does, it first stops a daemon
+   that runs on this data directory outside the service, such as one you
+   started by hand, so the service's daemon can start. The service runs the
+   binary that `service install` recorded, so this is the new one when
+   `update` replaced that file.
+2. Otherwise stops the daemon that runs on this data directory, as
+   [`wayfindr stop`](#wayfindr-stop) does, and prints
+   `Stopped the daemon (pid 4242); the next client starts the new binary.` The
+   next stdio client starts the new binary, or you can run
+   [`wayfindr start`](#wayfindr-start).
+3. Prints nothing more when no daemon runs.
+
+The service has to be restarted, not just stopped: it restarts the daemon only
+when it fails, so a clean stop would leave it down until your next login.
+
+Under `sudo`, as when the binary is in a directory only root can write,
+`update` replaces the binary but restarts nothing, since a restart as root
+would reach root's daemon and login service, not yours. It prints
+`Running as root through sudo, so no daemon was restarted.` with the next
+step: as your own user, run `wayfindr stop`, or `wayfindr service install` if
+you use the login service.
+
+**`--check`** compares this version with the latest release, or with the version
+you name, and never downloads an archive. It prints the same up-to-date or
+newer line as above, or, when the release is newer:
+
+```text
+$ wayfindr update --check
+wayfindr v0.1.0 → v0.2.0 available; run `wayfindr update` to install it
+```
+
+With a version named, the command it suggests names that version, since a
+plain `wayfindr update` installs the latest release:
+
+```text
+$ wayfindr update --check v0.3.0-rc.1
+wayfindr v0.2.0 → v0.3.0-rc.1 available; run `wayfindr update v0.3.0-rc.1` to install it
+```
+
+**`--json`** works only with `--check`; `wayfindr update --json` fails with
+`--json is supported by "wayfindr update" only with --check`. It prints:
+
+```json
+{
+  "current": "v0.1.0",
+  "latest": "v0.2.0",
+  "update_available": true
+}
+```
+
+`latest` is the version you named, if you named one. `update_available` is true
+only when it is newer than `current`, the same case that exits `2`.
+
+```sh
+wayfindr update --check > /dev/null
+if [ $? -eq 2 ]; then wayfindr update; fi
+```
+
+| Situation                                                       | Error                                                                                                                                                                                        |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub can't be reached                                         | `find the latest release: …`, or `download wayfindr v0.2.0: …` once the release is known. Nothing is written.                                                                                |
+| The version doesn't exist                                       | `download wayfindr v9.9.9: download https://github.com/atomicpages/wayfindr/releases/download/v9.9.9/checksums.txt: 404 Not Found`. Nothing is written.                                      |
+| The checksum doesn't match, or the archive isn't in the list    | `download wayfindr v0.2.0: checksum mismatch for <archive>: …`, or `… <archive> is not listed in checksums.txt of v0.2.0`. Nothing is written.                                               |
+| The binary's directory isn't writable, such as `/usr/local/bin` | `install wayfindr v0.2.0: cannot write to /usr/local/bin: re-run with permission to write there (for example with sudo), or reinstall with the installer: …`. Nothing is written.            |
+| The service was installed, but didn't restart                   | `updated wayfindr to v0.2.0 at <path>, but the login service did not restart: …`, then `` Restart it with `wayfindr service install` ``. The new binary stays in place.                      |
+| No service, and the running daemon didn't stop                  | `updated wayfindr to v0.2.0 at <path>, but the running daemon did not stop: …`, then ``Stop it with `wayfindr stop`; the next client starts the new binary``. The new binary stays in place. |
+
+**Exit:** `0` once the binary is replaced, and when there is nothing to update.
+`1` on any error. With `--check`, `2` instead of `0` when the release is newer,
+without an `Error:` line, as with [`status --check`](#wayfindr-status). A
+failure to reach GitHub is still `1`.
 
 ## `wayfindr version`
 

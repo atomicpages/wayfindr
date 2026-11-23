@@ -69,8 +69,8 @@ as "design §9".
   the admin API. It adds connectors (ADR 0017) and never edits or removes one. A
   sign-in redirect goes to an http(s) authorize URL only.
 - Writing the config: the user, the CLI, and the daemon
-  (`POST /admin/connectors` and `PUT /admin/server/public-url`, default token
-  only) write `wayfindr.toml`, each
+  (`POST /admin/connectors`, `PUT /admin/server/public-url`, and
+  `PUT /admin/server/oauth`, default token only) write `wayfindr.toml`, each
   with `newfile.Replace` against the bytes it read. A command connector runs a
   program, so the console never adds one from a single form post: it shows the
   exact argv and environment and waits for a confirm carrying a single-use,
@@ -85,7 +85,65 @@ as "design §9".
   redirect's `Location`, or any answer's body. The test follows no redirect,
   reads at most 1 MiB of an answer, and ends after 10 seconds. A second probe
   without a token detects a proxy that makes internet traffic look local
-  (`proxy_treats_remote_as_local`).
+  (`proxy_treats_remote_as_local`). The OAuth form of the test (ChatGPT)
+  sends no token at all: only the tokenless probe and two GETs of the
+  metadata documents, under the same limits.
+- Wayfindr's authorization server (ADR 0022, [§7.11](7.11-oauthserver.md)):
+  off unless `[server.oauth] enabled`, and off its routes answer as before,
+  byte for byte. On, its public routes and the `/mcp` challenge answer a
+  remote request only through the tunnel (the issuer's `Host`, or a loopback
+  `Host` with a forwarding header), so a DNS-rebinding page, with its own
+  `Host` and no forwarding header, still gets the 404 and can't read
+  `public_url`. Nothing reachable through the tunnel can grant access: the
+  public `/oauth/authorize` only checks a request and keeps it pending, and
+  only the console's approve page, on the loopback address, with a session,
+  the same-origin `Origin`, and the CSRF token, makes a code. A `client_id`
+  not in `clients` is refused before any fetch or pending entry. The
+  authorization endpoint accepts a request only while the user has armed it
+  from the console (Connect, 10 minutes), so a stranger can't queue a request
+  at other times. Nor can a stranger keep the user's out: authorize never
+  consumes the arm, so a stranger's valid requests (the client ID and
+  `redirect_uri` are public) only sit beside the user's, at most 8, until the
+  console claims one. The claim is the user's signed-in approve page, which
+  only the user's own browser reaches with the id, by following the `302`; it
+  ends the arm and drops every other pending authorization, so a stranger's
+  request is never answered after it. The console cookie is `SameSite=Strict`
+  and the approve page without a session claims nothing, so a site that opens
+  the approve page with a stranger's id claims nothing by itself; only the
+  user's click on the Continue page's Continue does, and that page says to
+  continue only after selecting Connect in an app and to close a tab the user
+  didn't open. Should the user continue anyway, the claim fails closed: the
+  server counts the requests that became pending during the arm, and with more
+  than one (the stranger's and the user's own) `Approve` refuses
+  (`ErrContested`, a 409) and the page offers only Deny, so a stranger's
+  request costs a retry, never a grant. A stranger who floods more than 8
+  requests in the seconds before the user's claim can evict the user's, which
+  likewise costs a retry. Turning OAuth off or on, changing `public_url`, or
+  changing `clients` disarms the server (`Disarm`): the arm, the pending and
+  claimed requests, and codes not yet exchanged go, so none survives a toggle. Only a top-level navigation passes authorize:
+  with `Sec-Fetch-*` present it must be `navigate` to a `document`, and a
+  prefetch or prerender is refused. Consent phishing, an attacker
+  sending the user a request they started themselves, is narrowed to the
+  minutes after the user's own Connect; the approve page shows when the
+  request started, the IP the tunnel reported (the last `X-Forwarded-For`
+  entry, the one the nearest proxy appended; no vendor header, which a browser
+  could send itself; shown, never trusted), and a fixed warning to deny a link
+  someone sent or a tab the user didn't open. Whether the client binds `state` to the user's own
+  browser is the client's affair and isn't verified. CIMD
+  documents are fetched through `httpclient.PublicOnly`, whose dialer refuses
+  every address that is not public (the list is in
+  [§7.11](7.11-oauthserver.md)) on the resolved address at connect time, with
+  no redirect and a size and time limit, and cached. PKCE S256 is required,
+  client authentication other than `none` is refused, `resource` and
+  `redirect_uri` match exactly, and `iss` is on every authorization response.
+  Codes and refresh tokens are spent by their first use, and one presented
+  again after it was spent revokes its grant (a refresh token only after a
+  30-second grace, for concurrent refreshes); access tokens expire (limits in
+  [§7.11](7.11-oauthserver.md)). Tokens are stored as SHA-256 digests only. A
+  grant is bound to `<public_url>/mcp` and to its client being allowed, so a
+  changed public URL, or the client removed from `clients`, suspends it;
+  reverting the change restores it. Codes, tokens, verifiers, challenges, and
+  `state` are never logged; error pages and token errors echo no input.
 - Log redaction: header values, tokens, codes, secret values, and URL query
   strings are never logged. The values of a connector's `${…}` references (url,
   headers, args, env) are masked as the reference wherever they sit, a url's
@@ -98,15 +156,15 @@ as "design §9".
   `redact.URLQueries`, at most 500 bytes, deleted with its row. The console
   renders it escaped, like every upstream text.
 - Usage report (ADR 0020, [§7.8](7.8-daemon.md) item 11): the only outbound
-  request that goes to neither an upstream, an authorization server, nor the
-  embedding provider. Off unless `[telemetry] enabled`; `DO_NOT_TRACK` and
-  non-release builds block it. It carries counts and allowlisted names only
-  (`internal/telemetry`): never a connector, tool, profile, scope, or token
-  name, a URL or host (an embedding host is `local`, a public provider's name,
-  or `other`), arguments, results, or error text. The install ID is a random
-  UUIDv4 in `<data>/telemetry-id`, written only once telemetry runs. The request
-  carries no credential and no header beyond `Content-Type` and `User-Agent`,
-  and ignores the response body.
+  request that goes to neither an upstream, an authorization server, the
+  embedding provider, nor an allowed client's metadata document (ADR 0022). Off
+  unless `[telemetry] enabled`; `DO_NOT_TRACK` and non-release builds block it.
+  It carries counts and allowlisted names only (`internal/telemetry`): never a
+  connector, tool, profile, scope, or token name, a URL or host (an embedding
+  host is `local`, a public provider's name, or `other`), arguments, results, or
+  error text. The install ID is a random UUIDv4 in `<data>/telemetry-id`,
+  written only once telemetry runs. The request carries no credential and no
+  header beyond `Content-Type` and `User-Agent`, and ignores the response body.
 - A failed sync's error is stored for `status` to display, so the catalog Syncer
   redacts its URL query strings (`internal/redact`) before `ApplySync` stores it
   ([§7.4](7.4-catalog.md)).

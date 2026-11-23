@@ -498,6 +498,9 @@ func TestReason(t *testing.T) {
 	}{
 		{config.Error{Case: config.CaseUnparsable}, "it does not parse, or would not after the edit"},
 		{config.Error{Case: config.CaseServerNotTable}, "server is not written as a [server] table"},
+		{config.Error{Case: config.CaseOAuthNotTable}, "server.oauth is not written as a [server.oauth] table"},
+		{config.Error{Case: config.CaseOAuthNotTable, Key: "server.oauth"}, "server.oauth is not written as a [server.oauth] table"},
+		{config.Error{Case: config.CaseOAuthNotTable, Key: "server"}, "server is not written as a [server] table"},
 		{config.Error{Case: config.CaseEditNotFound, Connector: "gmail"}, "no connector is called gmail"},
 	}
 

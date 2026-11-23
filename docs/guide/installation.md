@@ -132,13 +132,40 @@ such as `/Users/you/.local/bin/wayfindr`, in the `command` of its MCP config.
 
 ## Upgrade
 
-Run the installer again. It replaces the binary in place.
+```sh
+wayfindr update --check   # is there a newer release?
+wayfindr update           # install it and restart the daemon
+```
 
-A running daemon keeps the old binary until it restarts. Stop it and let the
-shim start the new one, or restart the service if you installed one. See
-[Running the daemon](./running). On Windows, the installer renames the running
-`wayfindr.exe` to `wayfindr.exe.old` and removes the leftovers on the next
-upgrade.
+```text
+Updated wayfindr v0.1.0 → v0.2.0 at /Users/you/.local/bin/wayfindr
+```
+
+`update` downloads the latest release for your OS and CPU, checks it against the
+release's `checksums.txt` as the installer does, and replaces the binary in
+place. `--check` installs nothing and exits `2` when a newer release exists. To
+install a given version, older ones included, name it:
+`wayfindr update v0.1.0`. See [`wayfindr update`](../reference/cli#wayfindr-update)
+for every flag.
+
+You can also run the installer again. It replaces the binary in place too. Use
+it to install from a mirror (`WAYFINDR_DOWNLOAD_URL`) or into another directory
+(`WAYFINDR_INSTALL_DIR`), which `update` doesn't support.
+
+A running daemon keeps the old binary until it restarts. `update` restarts it
+for you: it restarts the [login service](./running#as-a-login-service) if you
+installed one, and otherwise stops the daemon so the next client starts the new
+binary. Pass `--no-restart` to skip that. Run with `sudo`, `update` restarts
+nothing, since it would reach root's daemon rather than yours: run
+`wayfindr stop` (or `wayfindr service install`) as yourself afterwards. The
+installer doesn't restart anything: stop the daemon with `wayfindr stop` and
+let the shim start the new one, or restart the service. See [Running the daemon](./running). On Windows,
+both rename the running `wayfindr.exe` to `wayfindr.exe.old` and remove the
+leftovers on the next upgrade.
+
+An older binary can't open a store that a newer one has migrated. See
+[Upgrades and downgrades](./storage#upgrades-and-downgrades) before you
+downgrade.
 
 ## Uninstall
 

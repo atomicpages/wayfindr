@@ -124,18 +124,24 @@ an HTTP entry would have to contain the token. Use the stdio shim with Zed.
 A cloud agent runs in a vendor's cloud, so it can't use stdio or reach your
 loopback address. It connects to `/mcp` over HTTPS through a tunnel you run, with
 a [remote client token](../guide/access/scoped-tokens#remote-tokens) as its
-bearer token. The [Cloud agents guide](../guide/cloud-agents) sets it up.
+bearer token, or, for ChatGPT, an OAuth grant you approve. The
+[Cloud agents guide](../guide/cloud-agents) sets it up.
 
-| Cloud agent   | Through a tunnel with a remote token | What it needs                                                                                                   | Checked with |
-| ------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------ |
-| Grok Bot      | Yes                                  | Version 0.79 or later: a custom connector with an `Authorization` header. Use a personal Bot, not a Team Bot.   | not yet      |
-| Muse (Meta)   | Yes                                  | A custom connector made in chat; paste the token into Muse's secure credential prompt.                          | not yet      |
-| ChatGPT (web) | Not yet                              | Its connectors take OAuth or no auth, with no header field, so it needs an OAuth sign-in Wayfindr doesn't have. | n/a          |
+| Cloud agent   | Through a tunnel | What it needs                                                                                                                                     | Checked with |
+| ------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| Grok Bot      | Yes              | Version 0.79 or later: a custom connector with an `Authorization` header and a remote token. Use a personal Bot, not a Team Bot.                  | not yet      |
+| Muse (Meta)   | Yes              | A custom connector made in chat with a remote token; paste the token into Muse's secure credential prompt.                                        | not yet      |
+| ChatGPT (web) | Yes              | A custom MCP server with OAuth, and [`[server.oauth]`](./configuration#server-oauth) on. You approve it in a browser on the Wayfindr computer.    | 2026-11-23   |
 
 Wayfindr serves these agents as clients, the same as any other, and adds nothing
 for them to the tools it exposes. An agent may ask you to confirm each
 `call_tool` call, because Wayfindr can't tell it which upstream tools only read.
 The agent's own settings decide that.
+
+ChatGPT on the web was checked on macOS on 2026-11-23, through a tunnel:
+connecting with OAuth and approving in the console, search and call from a chat
+and from a dot, a refreshed access token after an hour, revoking the grant, and
+turning sign-in off and on.
 
 ### Manual checks
 

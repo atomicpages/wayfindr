@@ -17,7 +17,10 @@ type RemoteOutcome string
 
 const (
 	// RemoteOK means through the public URL, the token reached the gateway, and a
-	// request without a token was refused as a remote one is.
+	// request without a token was refused as a remote one is. For the OAuth
+	// test (RemoteDetailOAuth) it means the discovery documents are there,
+	// name the public URL, and a request without a token got Wayfindr's own
+	// challenge.
 	RemoteOK RemoteOutcome = "ok"
 	// RemoteNotConfigured means server.public_url is not set.
 	RemoteNotConfigured RemoteOutcome = "not_configured"
@@ -38,14 +41,30 @@ const (
 	// RemoteRedirect means the address answered with a redirect, which the test
 	// does not follow.
 	RemoteRedirect RemoteOutcome = "redirect"
-	// RemoteNotFound means Wayfindr's own 404 for the token: the token is not a
-	// remote one, is wrong, or was revoked, the address or path is wrong, or
-	// the daemon predates remote tokens.
+	// RemoteNotFound means Wayfindr's own 404 for the token. Through a tunnel
+	// that is a token that is not a remote one, is wrong, or was revoked
+	// only while OAuth is off; while it is on, a bad token gets
+	// RemoteTokenInvalid, and a 404 means the path did not reach Wayfindr's
+	// /mcp (a wrong address, a tunnel pointed elsewhere, or a daemon that
+	// predates remote tokens).
 	RemoteNotFound RemoteOutcome = "not_found"
-	// RemoteTokenRefused means the address answered 401 or 403 to the token:
-	// a login or access check in front of Wayfindr, since Wayfindr itself
-	// answers 404 through a tunnel.
+	// RemoteTokenRefused means the address answered the token with a 401 or
+	// 403 that is not Wayfindr's own challenge: a login or access check in
+	// front of Wayfindr.
 	RemoteTokenRefused RemoteOutcome = "token_refused"
+	// RemoteTokenInvalid means the token got Wayfindr's own 401 invalid_token
+	// challenge: it is not a remote token, is wrong, or was revoked. With
+	// OAuth on this replaces the 404 RemoteNotFound.
+	RemoteTokenInvalid RemoteOutcome = "token_invalid"
+	// RemoteOAuthOff means the OAuth test was asked while server.oauth is off.
+	// Nothing was sent.
+	RemoteOAuthOff RemoteOutcome = "oauth_off"
+	// RemoteMetadataMissing means a metadata document, or the 401 challenge
+	// that points at one, is not there: Wayfindr's own 404 or no document.
+	RemoteMetadataMissing RemoteOutcome = "metadata_missing"
+	// RemoteMetadataMismatch means the discovery documents or the challenge
+	// name another address than the public URL.
+	RemoteMetadataMismatch RemoteOutcome = "metadata_mismatch"
 	// RemoteProxyTreatsRemoteAsLocal means a request with no token got 401 with
 	// Wayfindr's own challenge (exactly `Bearer`, no parameters), which only a
 	// request the daemon takes for local gets.
@@ -58,11 +77,14 @@ const (
 	RemoteUnexpected RemoteOutcome = "unexpected_response"
 )
 
-// RemoteTestRequest is the body of POST /admin/remote/test. The token is the
-// value of a remote client token, held by the caller for this one request.
-// The daemon sends it to the public URL and never stores or logs it.
+// RemoteTestRequest is the body of POST /admin/remote/test: exactly one of
+// Token and OAuth. The token is the value of a remote client token, held by
+// the caller for this one request. The daemon sends it to the public URL and
+// never stores or logs it. OAuth asks for the test of sign-in with OAuth
+// instead, which needs no token.
 type RemoteTestRequest struct {
-	Token string `json:"token"`
+	Token string `json:"token,omitempty"`
+	OAuth bool   `json:"oauth,omitempty"`
 }
 
 // RemoteTestResult is the answer to POST /admin/remote/test, whatever the
@@ -110,6 +132,9 @@ const (
 	// Wayfindr's own: the tunnel provider answering for a tunnel that is not
 	// running or not connected to Wayfindr.
 	RemoteDetailTunnelOffline RemoteDetail = "tunnel_offline"
+	// RemoteDetailOAuth marks a RemoteOK as the answer of the OAuth test,
+	// which has no connectors or tools to count.
+	RemoteDetailOAuth RemoteDetail = "oauth"
 )
 
 // RemoteFacts is what a connection test found: the inputs to the words
@@ -139,6 +164,13 @@ func DescribeRemote(o RemoteOutcome, f RemoteFacts) RemoteTestResult {
 
 	switch o {
 	case RemoteOK:
+		if f.Detail == RemoteDetailOAuth {
+			res.Message = "It works. Through the tunnel, a cloud agent finds Wayfindr's sign-in at " + f.URL +
+				", and a request with no token is refused as one from the internet is."
+
+			break
+		}
+
 		res.Message = "It works. A cloud agent with this token reaches Wayfindr at " + f.URL + " and sees " +
 			plural(f.Connectors, "connector") + "."
 		res.Connectors, res.Tools = f.Connectors, f.Tools
@@ -183,14 +215,31 @@ func DescribeRemote(o RemoteOutcome, f RemoteFacts) RemoteTestResult {
 		res.Message = f.Host + " redirected the request to " + where + ". The test does not follow redirects, and a cloud agent may not either."
 		res.Action = "Set the public URL to the address the tunnel serves directly: the exact host name, with https and no redirect."
 	case RemoteNotFound:
-		res.Message = f.Host + " answered 404. Through a tunnel, Wayfindr answers that when the token is not a remote token, is wrong, or was revoked, " +
-			"and when the URL is wrong."
+		res.Message = f.Host + " answered 404. With sign-in (OAuth) off, Wayfindr answers that through a tunnel when the token is not a remote token, " +
+			"is wrong, or was revoked, and when the URL is wrong. With sign-in on, a bad token gets a 401 instead, so a 404 means the request " +
+			"did not reach Wayfindr's /mcp: the URL is wrong, or the tunnel points somewhere else."
 		res.Action = "Check that the token was created as remote and is still listed, that the public URL is the address your tunnel serves, " +
 			"that the tunnel points at Wayfindr's port, and that Wayfindr is up to date."
 	case RemoteTokenRefused:
-		res.Message = f.Host + " refused the request (HTTP " + strconv.Itoa(f.Status) + "). A login or access check in front of Wayfindr, " +
+		res.Message = f.Host + " refused the request (HTTP " + strconv.Itoa(f.Status) + "), and not with Wayfindr's own answer. A login or access check in front of Wayfindr, " +
 			"in the tunnel or proxy, is stopping it before Wayfindr sees the token."
 		res.Action = "Turn off the login or access check the tunnel or proxy adds in front of Wayfindr for this address, then test again."
+	case RemoteTokenInvalid:
+		res.Message = f.Host + " answered 401: Wayfindr does not accept this token. It is not a remote token, is wrong, or was revoked."
+		res.Action = "Check that the token was created as remote and is still listed (wayfindr token list), then test again."
+	case RemoteOAuthOff:
+		// Nothing was sent, so there is no URL or status to report.
+		res.URL, res.Status = "", 0
+		res.Message = "Sign-in with OAuth is off, so Wayfindr does not answer sign-in requests through the tunnel, and there is nothing to test."
+		res.Action = "Turn on sign-in for cloud agents (server.oauth.enabled), then test again."
+	case RemoteMetadataMissing:
+		res.Message = f.Host + " does not give the sign-in information a cloud agent looks for" + statusWords(f.Status) +
+			". Wayfindr gives it only while sign-in is on, at its public address."
+		res.Action = "Check that sign-in is on, that the public URL is the address your tunnel serves, " +
+			"and that the tunnel passes every path, including /.well-known/ and /oauth/, to Wayfindr."
+	case RemoteMetadataMismatch:
+		res.Message = "The sign-in information at " + f.Host + " names another address than the public URL, so a cloud agent would be sent there to sign in."
+		res.Action = "Set the public URL to the exact address your tunnel serves (https, same host name), or point the tunnel at this Wayfindr, then test again."
 	case RemoteProxyTreatsRemoteAsLocal:
 		res.Message = "Not safe: the tunnel or proxy at " + f.Host + " hides that requests come from the internet. " +
 			"Wayfindr takes them for requests from your own computer, so your default client token, which reaches every connector, " +
@@ -206,13 +255,23 @@ func DescribeRemote(o RemoteOutcome, f RemoteFacts) RemoteTestResult {
 			res.Message = "The token works, but the same request without a token got HTTP " + strconv.Itoa(f.Status) +
 				" from " + f.Host + ", not the 404 that Wayfindr gives a request from the internet. The test can't confirm the path is safe."
 			res.Action = "Check the proxy or tunnel in front of Wayfindr, and that it adds a forwarding header such as X-Forwarded-For."
-		case RemoteDetailNone, RemoteDetailInvalidURL, RemoteDetailTunnelOffline:
+		case RemoteDetailNone, RemoteDetailInvalidURL, RemoteDetailTunnelOffline, RemoteDetailOAuth:
 			res.Message = f.Host + " answered HTTP " + strconv.Itoa(f.Status) + ", which is not what Wayfindr's MCP endpoint answers."
 			res.Action = "Check that the tunnel points at Wayfindr's port and that Wayfindr is running."
 		}
 	}
 
 	return res
+}
+
+// statusWords words an HTTP status for the end of a sentence: " (HTTP 404)",
+// or nothing when there was none.
+func statusWords(status int) string {
+	if status == 0 {
+		return ""
+	}
+
+	return " (HTTP " + strconv.Itoa(status) + ")"
 }
 
 // plural words n of noun: "1 connector", "3 connectors".
@@ -235,14 +294,22 @@ func (a api) remoteTest(w http.ResponseWriter, r *http.Request) {
 
 	var body RemoteTestRequest
 
-	if err := readJSON(w, r, MaxRemoteTestBody, &body); err != nil || body.Token == "" {
+	// Exactly one of the two: a token to test with, or the OAuth test.
+	if err := readJSON(w, r, MaxRemoteTestBody, &body); err != nil || (body.Token != "") == body.OAuth {
 		if mbe := (*http.MaxBytesError)(nil); errors.As(err, &mbe) {
 			http.Error(w, "the token is too large", http.StatusRequestEntityTooLarge)
 
 			return
 		}
 
-		http.Error(w, `body must be {"token": "<remote client token>"}`, http.StatusBadRequest)
+		http.Error(w, `body must be {"token": "<remote client token>"} or {"oauth": true}`, http.StatusBadRequest)
+
+		return
+	}
+
+	// The OAuth test of an authorization server that is off sends nothing.
+	if body.OAuth && !a.Config().OAuth.Enabled {
+		writeJSON(w, DescribeRemote(RemoteOAuthOff, RemoteFacts{}))
 
 		return
 	}
@@ -257,6 +324,7 @@ func (a api) remoteTest(w http.ResponseWriter, r *http.Request) {
 
 	// Whether the address is a usable https one is the tester's call, not
 	// checked here: it is what sends the secret there, so its guard is the one.
+	// An empty token is the OAuth test.
 	res := a.TestRemote(r.Context(), publicURL, body.Token)
 	res.OK = res.Outcome == RemoteOK
 
@@ -273,6 +341,18 @@ func (a api) remoteTest(w http.ResponseWriter, r *http.Request) {
 func (c *Client) TestRemote(ctx context.Context, token string) (RemoteTestResult, error) {
 	var out RemoteTestResult
 	err := c.do(ctx, http.MethodPost, pathRemoteTest, RemoteTestRequest{Token: token}, &out)
+
+	return out, err
+}
+
+// TestRemoteOAuth calls POST /admin/remote/test with {"oauth": true}: it
+// fetches, through the running config's server.public_url, what a cloud agent
+// that signs in with OAuth (ChatGPT) fetches, and reports how far it got. No
+// token is involved. As for TestRemote, every outcome is a RemoteTestResult;
+// while server.oauth is off the answer is RemoteOAuthOff and nothing is sent.
+func (c *Client) TestRemoteOAuth(ctx context.Context) (RemoteTestResult, error) {
+	var out RemoteTestResult
+	err := c.do(ctx, http.MethodPost, pathRemoteTest, RemoteTestRequest{OAuth: true}, &out)
 
 	return out, err
 }

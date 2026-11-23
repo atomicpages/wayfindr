@@ -2,9 +2,9 @@
 <div class="page-head">
   <div>
     <h1>Cloud agents</h1>
-    <p>Connect an always-on agent that runs in the cloud, such as Grok Bot or Muse, to your connectors. You run a tunnel
-      that gives Wayfindr a public https address, and the agent gets its own token, limited to the connectors you
-      pick.</p>
+    <p>Connect an always-on agent that runs in the cloud, such as Grok Bot, Muse, or ChatGPT, to your connectors. You run
+      a tunnel that gives Wayfindr a public https address. Grok Bot and Muse get their own token, limited to the
+      connectors you pick; ChatGPT signs in with OAuth, and you pick its connectors when you approve it.</p>
   </div>
 </div>
 
@@ -16,12 +16,13 @@
 </nav>
 
 {{if .Error}}<div class="alert err" role="alert">{{icon "alert"}}<div><b>That didn't work</b><p>{{.Error}}</p></div></div>{{end}}
+{{if .Notice}}<div class="alert ok" role="status">{{icon "check"}}<div><p>{{.Notice}}</p></div></div>{{end}}
 
 {{if eq .Stage "agent"}}
 <form class="card" method="get" action="/ui/cloud-agents">
   <input type="hidden" name="step" value="connectors">
   <div class="card-head">
-    <h2>Step 1 of 6: Pick your agent</h2>
+    <h2>Step {{.StepN}} of {{.StepTotal}}: Pick your agent</h2>
     <p>Which cloud agent are you connecting?</p>
   </div>
   <div class="card-body form">
@@ -31,12 +32,22 @@
         {{range .Agents}}<label class="check option" for="agent-{{.ID}}"><input type="radio" id="agent-{{.ID}}" name="agent"
             value="{{.ID}}"{{if .Checked}} checked{{end}}{{if .Disabled}} disabled{{else}} required{{end}}><span class="opt-text"><b>{{.Name}}</b><small
               class="hint">{{.Blurb}}</small></span></label>
+        {{if .Connect}}<div class="option-action"><button class="btn btn-outline btn-sm" type="submit" form="arm-form">Connect a client</button>
+          <small class="hint">Sign-in is on. Lets one sign-in request through for the next 10 minutes.</small></div>{{end}}
         {{end}}
       </div>
     </fieldset>
     <div><button class="btn btn-primary" type="submit">Next: connectors</button></div>
   </div>
 </form>
+{{if .ConnectOffer}}
+{{/* The "Connect a client" button on the ChatGPT row belongs to this form: a
+form can't sit inside the agent form. */}}
+<form id="arm-form" method="post" action="/ui/cloud-agents/arm">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <input type="hidden" name="agent" value="chatgpt">
+</form>
+{{end}}
 {{end}}
 
 {{if eq .Stage "connectors"}}
@@ -51,11 +62,7 @@
     <fieldset class="field">
       <legend class="sr">Connectors</legend>
       {{if .Connectors}}
-      <div class="options">
-        {{range .Connectors}}<label class="check option" for="cc-{{.}}"><input type="checkbox" id="cc-{{.}}" name="connector"
-            value="{{.}}"{{if index $.Body.Picked .}} checked{{end}}>{{template "mini" (logo .)}}{{.}}</label>
-        {{end}}
-      </div>
+      {{template "picker" (picker .Connectors .Picked)}}
       {{else}}<span class="muted">No connectors are configured yet. <a href="/ui/add">Add one</a> first.</span>{{end}}
     </fieldset>
     <div class="actions">
@@ -72,7 +79,7 @@
   <input type="hidden" name="agent" value="{{.Agent.ID}}">
   {{range .PickedList}}<input type="hidden" name="connector" value="{{.}}">{{end}}
   <div class="card-head">
-    <h2>Step 3 of 6: Your public address</h2>
+    <h2>Step {{.StepN}} of {{.StepTotal}}: Your public address</h2>
     <p>The https address that reaches Wayfindr from the internet.</p>
   </div>
   <div class="card-body form">
@@ -114,7 +121,102 @@
 </form>
 {{end}}
 
-{{if eq .Stage "done"}}
+{{if eq .Stage "oauth"}}
+<form class="card" method="post" action="/ui/cloud-agents/oauth">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <input type="hidden" name="agent" value="{{.Agent.ID}}">
+  <input type="hidden" name="enabled" value="true">
+  <div class="card-head">
+    <h2>Step {{.StepN}} of {{.StepTotal}}: Turn on sign-in for {{.Agent.Name}}</h2>
+    <p>{{.Agent.Name}} signs in with OAuth instead of a token. Wayfindr answers its sign-in requests through your tunnel.</p>
+  </div>
+  <div class="card-body form">
+    <p>Turning this on makes Wayfindr answer a few more addresses through your tunnel, and only these:</p>
+    <ul>
+      <li>Its sign-in information, <code>/.well-known/oauth-protected-resource</code> and <code>/.well-known/oauth-authorization-server</code>.</li>
+      <li>Its sign-in and token addresses, <code>/oauth/authorize</code> and <code>/oauth/token</code>.</li>
+      <li>A <code>401</code> answer from <code>/mcp</code> that points to them, in place of the <code>404</code>.</li>
+    </ul>
+    <p>Nothing gets your connectors without you. A connection needs you to select Connect a client first, and to approve
+      it in this console, on this computer. Wayfindr saves the setting in your config file as
+      <code>server.oauth.enabled</code>.</p>
+    <div class="actions">
+      <a class="btn btn-ghost" href="{{.BackHref}}">Back</a>
+      <button class="btn btn-primary" type="submit">Turn on sign-in (OAuth)</button>
+    </div>
+  </div>
+</form>
+{{end}}
+
+{{if and (eq .Stage "done") .Agent.OAuth}}
+{{if .ArmedUntil}}
+<div class="alert ok" role="status">{{icon "check"}}<div>
+    <p>Ready for {{.Agent.Name}} until {{.ArmedUntil}}. Add the connector in {{.Agent.Name}} now; you will approve it on this computer.</p>
+  </div>
+</div>
+{{end}}
+
+<section class="card" aria-labelledby="connect-h">
+  <div class="card-head">
+    <h2 id="connect-h">Step {{.StepN}} of {{.StepTotal}}: Connect {{.Agent.Name}}</h2>
+    <p>Select Connect a client, then add Wayfindr in {{.Agent.Name}}. It sends your browser here to approve it, and you pick the connectors then.</p>
+  </div>
+  <div class="card-body form">
+    {{if not .Setup.McpURL}}
+    <div class="alert warn" role="note">{{icon "alert"}}<div><b>No public URL is set</b><p>Go back to step 2 and save the
+          https address your tunnel gives you; the setup text needs it.</p></div></div>
+    {{else}}
+    <p class="note">In ChatGPT on the web, open <b>Plugins</b>, select <b>+</b>, then <b>Add custom MCP server</b>, and fill in the form:</p>
+    <dl class="review setup">
+      <div><dt>Server URL</dt><dd><code id="c-url">{{.Setup.McpURL}}</code><button class="btn btn-outline btn-sm copy" type="button" data-copy="#c-url" aria-label="Copy server URL" aria-live="polite">{{icon "copy"}}<span>Copy</span></button></dd></div>
+      <div><dt>Authentication</dt><dd>OAuth</dd></div>
+      <div><dt>Client ID and secret</dt><dd>Leave them empty. ChatGPT identifies itself to Wayfindr, so there is nothing to paste.</dd></div>
+    </dl>
+    {{end}}
+    <form method="post" action="/ui/cloud-agents/arm">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="agent" value="{{.Agent.ID}}">
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Connect a client</button>
+      </div>
+      <small class="hint">Lets one sign-in request through for the next 10 minutes. Select it again if the time passes.</small>
+    </form>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="test-h">
+  <div class="card-head">
+    <h2 id="test-h">Test the connection</h2>
+    <p>Wayfindr fetches its sign-in information through your public address, the way {{.Agent.Name}} will. No token is involved.</p>
+  </div>
+  <div class="card-body form">
+    {{with .Test}}{{template "testResult" .}}{{end}}
+    <form method="post" action="/ui/cloud-agents/test">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="agent" value="{{.Agent.ID}}">
+      <button class="btn btn-primary" type="submit">{{if .Test}}Test again{{else}}Test the connection{{end}}</button>
+    </form>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="off-h">
+  <div class="card-head">
+    <h2 id="off-h">Turn off sign-in</h2>
+    <p>Wayfindr stops answering sign-in requests through the tunnel, and {{.Agent.Name}} is refused until you turn it on again.
+      Revoke its connection in the list below to remove it for good.</p>
+  </div>
+  <div class="card-body form">
+    <form method="post" action="/ui/cloud-agents/oauth">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="agent" value="{{.Agent.ID}}">
+      <input type="hidden" name="enabled" value="false">
+      <button class="btn btn-outline" type="submit">Turn off sign-in</button>
+    </form>
+  </div>
+</section>
+{{end}}
+
+{{if and (eq .Stage "done") (not .Agent.OAuth)}}
 <div class="alert ok">{{icon "key"}}<div>
     <b>Copy the token for {{.TokenName}} now</b>
     <p>Wayfindr stores only a hash, so this is the only time you'll see it. Keep this page open until the agent is set
@@ -196,7 +298,7 @@
 <section class="card" aria-labelledby="remote-h">
   <div class="card-head">
     <h2 id="remote-h">Your cloud agents</h2>
-    <p>Remote tokens, which can reach Wayfindr through a tunnel. Revoking one takes effect on its next request.</p>
+    <p>Remote tokens and OAuth connections, which can reach Wayfindr through a tunnel. Revoking one takes effect on its next request.</p>
   </div>
   {{if .RemoteUnavailable}}
   <div class="card-body"><p class="muted" role="note">The list of your cloud agents could not be read just now. The token above is
@@ -216,7 +318,7 @@
       <tbody>
         {{range .Remote}}
         <tr>
-          <td class="name">{{.Name}} <span class="badge secondary" title="Can reach Wayfindr through a tunnel">remote</span></td>
+          <td class="name">{{.Name}} {{if .OAuth}}<span class="badge secondary" title="Signed in with OAuth">oauth{{with .ClientHost}} · {{.}}{{end}}</span>{{else}}<span class="badge secondary" title="Can reach Wayfindr through a tunnel">remote</span>{{end}}</td>
           <td>
             <div class="chips">{{range .Connectors}}<span class="badge secondary">{{template "mini" (logo .)}}{{.}}</span>{{end}}</div>
           </td>

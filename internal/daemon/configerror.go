@@ -54,6 +54,8 @@ func configCase(c config.Case) admin.ConfigCase {
 		return admin.ConfigCaseChangesOthers
 	case config.CaseServerNotTable:
 		return admin.ConfigCaseServerNotTable
+	case config.CaseOAuthNotTable:
+		return admin.ConfigCaseOAuthNotTable
 	}
 
 	return ""

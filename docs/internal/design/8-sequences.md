@@ -27,6 +27,10 @@ Browser → AS consent → 302 http://127.0.0.1:7777/oauth/callback?code&state[&
 ◄─ long-poll returns done with slack's row; CLI prints "Authorized slack." "slack is ready (42 tools)."
 ```
 
+**A cloud agent signs in with OAuth** (ChatGPT, ADR 0022): the whole flow,
+from the 401 challenge to a refresh, is the sequence diagram in
+[§7.11](7.11-oauthserver.md).
+
 **Revoke**
 
 ```

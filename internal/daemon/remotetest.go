@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 
 	"github.com/atomicpages/wayfindr/internal/admin"
 	"github.com/atomicpages/wayfindr/internal/clienttoken"
+	"github.com/atomicpages/wayfindr/internal/config"
+	"github.com/atomicpages/wayfindr/internal/oauthserver"
 )
 
 const (
@@ -68,6 +71,16 @@ const toolsListBody = `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
 // probes, so a tunnel that is down is never read as a bad token, nor as a
 // request the daemon saw as remote.
 //
+// With OAuth on (ADR 0022, design §7.11) a request that came from the
+// internet gets 401 with a challenge naming the protected resource metadata
+// (`Bearer resource_metadata="<public_url>/.well-known/oauth-protected-resource/mcp"`),
+// not the 404. That challenge counts in probe B as the 404 does, and as the
+// answer to a bad token it is `token_invalid`. A test with no token (ChatGPT)
+// is the OAuth probe: the same tokenless initialize must get that challenge,
+// and the two discovery documents it leads to, fetched from the addresses
+// the test computes and never from the ones an answer names, must describe
+// the public URL.
+//
 // It never logs, stores, or echoes the token, a URL's query, or an answer's
 // body. It follows no redirect.
 type remoteTester struct {
@@ -91,7 +104,8 @@ func newRemoteTester(base *http.Client, timeout time.Duration, registry *clientt
 	return &remoteTester{client: &c, timeout: timeout, registry: registry, log: log}
 }
 
-// test runs both probes against publicURL's /mcp.
+// test runs the probes against publicURL's /mcp: both of the token's when
+// token is set, the OAuth probe when it is empty.
 func (t *remoteTester) test(ctx context.Context, publicURL, token string) admin.RemoteTestResult {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, t.timeout)
@@ -109,6 +123,12 @@ func (t *remoteTester) test(ctx context.Context, publicURL, token string) admin.
 type probe struct {
 	endpoint string
 	host     string
+	// issuer is the public URL without a trailing slash, the issuer Wayfindr
+	// names while OAuth is on.
+	issuer string
+	// want is the resource metadata URL Wayfindr's own challenge names
+	// (oauthserver.ResourceMetadataURL(issuer)).
+	want string
 }
 
 // reply is one answer: its status, headers, and at most maxRemoteTestReply
@@ -128,7 +148,18 @@ func (t *remoteTester) run(ctx context.Context, publicURL, token string) admin.R
 		return invalidPublicURL()
 	}
 
-	p := probe{endpoint: u.Scheme + "://" + u.Host + "/mcp", host: u.Host}
+	issuer := config.Server{PublicURL: publicURL}.Issuer()
+	p := probe{
+		endpoint: u.Scheme + "://" + u.Host + "/mcp",
+		host:     u.Host,
+		issuer:   issuer,
+		want:     oauthserver.ResourceMetadataURL(issuer),
+	}
+
+	// No token is the OAuth test.
+	if token == "" {
+		return t.probeOAuth(ctx, p)
+	}
 
 	// Probe A: the token's path.
 	res, answered := t.probeA(ctx, p, token)
@@ -150,14 +181,31 @@ func (t *remoteTester) run(ctx context.Context, publicURL, token string) admin.R
 		return res
 	}
 
+	if local, ok := p.treatsRemoteAsLocal(bare); ok {
+		return local
+	}
+
 	switch {
-	case bare.status == http.StatusUnauthorized && isWayfindrChallenge(bare.header):
-		return p.result(admin.RemoteProxyTreatsRemoteAsLocal, bare.status, admin.RemoteDetailNone)
-	case res.Outcome != admin.RemoteOK, bare.status == http.StatusNotFound:
+	case res.Outcome != admin.RemoteOK, bare.status == http.StatusNotFound,
+		bare.status == http.StatusUnauthorized && p.ourChallenge(bare.header):
+		// What a request from the internet gets: the 404, or with OAuth on
+		// Wayfindr's own challenge to a request with no token.
 		return res
 	default:
 		return p.result(admin.RemoteUnexpected, bare.status, admin.RemoteDetailBareStatus)
 	}
+}
+
+// treatsRemoteAsLocal is the proxy_treats_remote_as_local result when bare,
+// the answer to a request with no token, is the plain challenge Wayfindr's
+// guard gives a local request: the tunnel hides that the request came from
+// outside, which is a security problem rather than a setup slip.
+func (p probe) treatsRemoteAsLocal(bare reply) (admin.RemoteTestResult, bool) {
+	if bare.status == http.StatusUnauthorized && isWayfindrChallenge(bare.header) {
+		return p.result(admin.RemoteProxyTreatsRemoteAsLocal, bare.status, admin.RemoteDetailNone), true
+	}
+
+	return admin.RemoteTestResult{}, false
 }
 
 // isWayfindrChallenge reports whether h carries the challenge Wayfindr's own
@@ -173,6 +221,92 @@ func isWayfindrChallenge(h http.Header) bool {
 	}
 
 	return false
+}
+
+// ourChallenge reports whether h carries Wayfindr's own challenge with OAuth
+// on: a `Bearer` challenge whose resource_metadata parameter is exactly the
+// address of this public URL's protected resource metadata. A proxy's
+// challenge, with a realm or another URL, is not ours.
+func (p probe) ourChallenge(h http.Header) bool {
+	return slices.Contains(bearerResourceMetadata(h), p.want)
+}
+
+// otherMetadata reports whether h carries a Bearer challenge that names a
+// resource_metadata address, none of them this public URL's: a Wayfindr (or
+// something that talks like one) that believes it lives somewhere else.
+func (p probe) otherMetadata(h http.Header) bool {
+	got := bearerResourceMetadata(h)
+
+	return len(got) > 0 && !slices.Contains(got, p.want)
+}
+
+// bearerResourceMetadata returns the resource_metadata parameter of every
+// Bearer challenge in h that has one. It reads the auth-params of each
+// WWW-Authenticate value that starts with Bearer: names and values separated
+// by commas, a value a token or a quoted string.
+func bearerResourceMetadata(h http.Header) []string {
+	var out []string
+
+	for _, v := range h.Values("WWW-Authenticate") {
+		scheme, rest, _ := strings.Cut(strings.TrimSpace(v), " ")
+
+		if !strings.EqualFold(scheme, "Bearer") {
+			continue
+		}
+
+		for {
+			rest = strings.TrimLeft(rest, " \t,")
+			name, after, ok := strings.Cut(rest, "=")
+
+			// A name with no value starts another challenge; nothing of ours
+			// follows.
+			if !ok || strings.ContainsAny(name, " \t,") {
+				break
+			}
+
+			var val string
+
+			val, rest = authParamValue(strings.TrimLeft(after, " \t"))
+
+			if strings.EqualFold(name, "resource_metadata") {
+				out = append(out, val)
+			}
+		}
+	}
+
+	return out
+}
+
+// authParamValue reads one auth-param value from the start of s, a quoted
+// string (with backslash escapes) or a token, and returns it with the rest.
+func authParamValue(s string) (val, rest string) {
+	if !strings.HasPrefix(s, `"`) {
+		i := strings.IndexAny(s, ", \t")
+
+		if i < 0 {
+			return s, ""
+		}
+
+		return s[:i], s[i:]
+	}
+
+	var b strings.Builder
+
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			if i+1 < len(s) {
+				i++
+				b.WriteByte(s[i])
+			}
+		case '"':
+			return b.String(), s[i+1:]
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+
+	return b.String(), ""
 }
 
 // invalidPublicURL is the result for an address that cannot be tested.
@@ -308,7 +442,30 @@ func (t *remoteTester) send(ctx context.Context, p probe, token, version, sessio
 		req.Header.Set(sessionHeader, session)
 	}
 
-	resp, err := t.client.Do(req)
+	return t.exchange(ctx, p, req)
+}
+
+// get fetches a discovery document from target, which the test computed from
+// the public URL, never one an answer named.
+func (t *remoteTester) get(ctx context.Context, p probe, target string) (reply, *admin.RemoteTestResult) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
+
+	if err != nil {
+		res := invalidPublicURL()
+
+		return reply{}, &res
+	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "wayfindr-connection-test")
+
+	return t.exchange(ctx, p, req)
+}
+
+// exchange sends req under ctx and reads at most maxRemoteTestReply bytes of
+// the answer. A non-nil result means the probe cannot go on, as for send.
+func (t *remoteTester) exchange(ctx context.Context, p probe, req *http.Request) (reply, *admin.RemoteTestResult) {
+	resp, err := t.client.Do(req.WithContext(ctx))
 
 	if err != nil {
 		res := p.networkFailure(err)
@@ -413,6 +570,11 @@ func (p probe) tokenStatus(r reply) *admin.RemoteTestResult {
 		outcome = admin.RemoteNotFound
 	case http.StatusUnauthorized, http.StatusForbidden:
 		outcome = admin.RemoteTokenRefused
+
+		// Wayfindr's own 401 (OAuth on): not a remote token, wrong, or revoked.
+		if r.status == http.StatusUnauthorized && p.ourChallenge(r.header) {
+			outcome = admin.RemoteTokenInvalid
+		}
 	default:
 		outcome = admin.RemoteUnexpected
 	}
@@ -474,4 +636,91 @@ func isTLSError(err error) bool {
 	}
 
 	return false
+}
+
+// probeOAuth is the test with no token: what ChatGPT does before it sends the
+// user to sign in. The same initialize with no Authorization header must get
+// Wayfindr's own challenge, and then the protected resource metadata it
+// names and the authorization server metadata that names must both describe
+// the public URL. The two documents are fetched from the addresses derived
+// from the public URL, so an answer cannot steer the test to another host.
+func (t *remoteTester) probeOAuth(ctx context.Context, p probe) admin.RemoteTestResult {
+	bare, fail := t.send(ctx, p, "", "", "", initializeBody)
+
+	if fail != nil {
+		return *fail
+	}
+
+	if local, ok := p.treatsRemoteAsLocal(bare); ok {
+		return local
+	}
+
+	switch {
+	case bare.status == http.StatusUnauthorized && p.ourChallenge(bare.header):
+		// Carry on to the documents.
+	case bare.status == http.StatusUnauthorized && p.otherMetadata(bare.header):
+		return p.result(admin.RemoteMetadataMismatch, bare.status, admin.RemoteDetailNone)
+	case bare.status == http.StatusNotFound:
+		// Wayfindr's own, since send turns any other 404 into unreachable.
+		return p.result(admin.RemoteMetadataMissing, bare.status, admin.RemoteDetailNone)
+	default:
+		return p.result(admin.RemoteUnexpected, bare.status, admin.RemoteDetailNone)
+	}
+
+	var resource struct {
+		Resource             string   `json:"resource"`
+		AuthorizationServers []string `json:"authorization_servers"`
+	}
+
+	if fail := t.document(ctx, p, p.want, &resource); fail != nil {
+		return *fail
+	}
+
+	if resource.Resource != oauthserver.Resource(p.issuer) || !slices.Equal(resource.AuthorizationServers, []string{p.issuer}) {
+		return p.result(admin.RemoteMetadataMismatch, http.StatusOK, admin.RemoteDetailNone)
+	}
+
+	var server struct {
+		Issuer                        string   `json:"issuer"`
+		AuthorizationEndpoint         string   `json:"authorization_endpoint"`
+		TokenEndpoint                 string   `json:"token_endpoint"`
+		CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported"`
+	}
+
+	if fail := t.document(ctx, p, p.issuer+oauthserver.ServerMetadataPath, &server); fail != nil {
+		return *fail
+	}
+
+	if server.Issuer != p.issuer || server.AuthorizationEndpoint != p.issuer+oauthserver.AuthorizePath ||
+		server.TokenEndpoint != p.issuer+oauthserver.TokenPath || !slices.Contains(server.CodeChallengeMethodsSupported, "S256") {
+		return p.result(admin.RemoteMetadataMismatch, http.StatusOK, admin.RemoteDetailNone)
+	}
+
+	return p.result(admin.RemoteOK, 0, admin.RemoteDetailOAuth)
+}
+
+// document fetches the JSON document at target into out. A non-nil result
+// means it is not there: Wayfindr's own 404, or a 200 that is not JSON; any
+// other status is an answer that is not Wayfindr's.
+func (t *remoteTester) document(ctx context.Context, p probe, target string, out any) *admin.RemoteTestResult {
+	r, fail := t.get(ctx, p, target)
+
+	if fail != nil {
+		return fail
+	}
+
+	var res admin.RemoteTestResult
+
+	switch {
+	case r.status == http.StatusNotFound:
+		res = p.result(admin.RemoteMetadataMissing, r.status, admin.RemoteDetailNone)
+	case r.status != http.StatusOK:
+		res = p.result(admin.RemoteUnexpected, r.status, admin.RemoteDetailNone)
+	case json.Unmarshal(r.body, out) != nil:
+		res = p.result(admin.RemoteMetadataMissing, r.status, admin.RemoteDetailNone)
+	default:
+		return nil
+	}
+
+	return &res
 }

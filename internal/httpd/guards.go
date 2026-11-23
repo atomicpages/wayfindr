@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -33,7 +34,9 @@ type guards struct {
 	// clients resolves scoped client tokens; nil accepts only the default
 	// token.
 	clients *clienttoken.Registry
-	log     zerolog.Logger
+	// resourceMetadataURL is Config.ResourceMetadataURL; nil is always off.
+	resourceMetadataURL func() string
+	log                 zerolog.Logger
 }
 
 // host is the outermost guard. It runs before routing, so a remote request
@@ -43,8 +46,20 @@ type guards struct {
 // header or a Host that isn't loopback (see isRemote).
 //
 // A local request, and any request for the OAuth callback, goes on to the
-// route's own guards. A remote request goes on only if admitRemote lets it,
-// with the Client it resolved in the context for the route's guards.
+// route's own guards. A remote request goes on, with how it was let in (an
+// admission) in the context for the route's guards, in one of two ways
+// (design §7.11): admitRemote lets it in with a remote token's Client, or,
+// while Wayfindr's authorization server is on and the request came through
+// the tunnel (see viaTunnel), its method and path are exactly one of the
+// authorization server's routes. Otherwise, while on and through the
+// tunnel, a request for mcpPath gets the 401 challenge that names the
+// protected resource metadata (ADR 0022), and anything else gets 404. A
+// rebinding page's request, a foreign Host with no forwarding header, gets
+// the 404 for those too, so it can't read public_url from the metadata or
+// the challenge.
+//
+// The URL is read once, and the bearer resolved, before the path is looked
+// at, so the 401 and the 404 cost the same work.
 func (gs guards) host(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if (gs.callback != "" && r.URL.Path == gs.callback) || !gs.isRemote(r) {
@@ -53,17 +68,43 @@ func (gs guards) host(next http.Handler) http.Handler {
 			return
 		}
 
-		c, refused := gs.admitRemote(r)
+		metadata := ""
 
-		if refused != "" {
-			gs.reject(r, refused)
-			http.NotFound(w, r)
-
-			return
+		if gs.resourceMetadataURL != nil {
+			metadata = gs.resourceMetadataURL()
 		}
 
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), remoteKey{}, c)))
+		if metadata != "" && !gs.viaTunnel(r, metadata) {
+			metadata = ""
+		}
+
+		c, refused := gs.admitRemote(r)
+
+		switch {
+		case refused == "":
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), remoteKey{}, admission{client: c})))
+		case metadata != "" && slices.Contains(publicMethods(r.URL.Path), r.Method):
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), remoteKey{}, admission{public: true})))
+		case metadata != "" && r.URL.Path == mcpPath:
+			gs.reject(r, refused)
+			challenge := `Bearer resource_metadata=` + quote(metadata)
+
+			if _, sent := r.Header["Authorization"]; sent {
+				challenge += `, error="invalid_token"`
+			}
+
+			w.Header().Set("WWW-Authenticate", challenge)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		default:
+			gs.reject(r, refused)
+			http.NotFound(w, r)
+		}
 	})
+}
+
+// quote returns s as an HTTP quoted-string (RFC 9110 §5.6.4).
+func quote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
 // isRemote reports whether r came through a proxy or tunnel, or names a Host
@@ -74,11 +115,75 @@ func (gs guards) isRemote(r *http.Request) bool {
 	return forwarded(r) || !gs.isLoopbackHostPort(r.Host)
 }
 
-// admitRemote is the whole decision on a remote request other than one for
+// viaTunnel reports whether remote request r may have the authorization
+// server's public admission and the /mcp challenge: its Host is the
+// issuer's, which metadata (the resource metadata URL, built from the
+// canonical issuer) carries, or it is a loopback name with the daemon's port
+// and r carries a forwarding header, as from a tunnel that rewrites Host.
+// Hosts compare case-insensitively, with a missing port as the issuer
+// scheme's default. Anything else, such as a rebinding page's foreign Host,
+// or a forwarding header beside a Host that is neither, is refused.
+func (gs guards) viaTunnel(r *http.Request, metadata string) bool {
+	if forwarded(r) && gs.isLoopbackHostPort(r.Host) {
+		return true
+	}
+
+	u, err := url.Parse(metadata)
+
+	if err != nil || u.Host == "" {
+		return false
+	}
+
+	wantName, wantPort, ok := splitHost(u.Host, u.Scheme)
+
+	if !ok {
+		return false
+	}
+
+	name, port, ok := splitHost(r.Host, u.Scheme)
+
+	return ok && name == wantName && port == wantPort
+}
+
+// splitHost splits a Host header or a URL's host into its lowercased name,
+// without brackets, and its port, the default port of scheme when it has
+// none. False when it is malformed or names no host.
+func splitHost(hostport, scheme string) (name, port string, ok bool) {
+	name, port, err := net.SplitHostPort(hostport)
+
+	if err != nil {
+		// No port: a name, or a bracketed IPv6 literal.
+		name, port = hostport, ""
+
+		if strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]") {
+			name = name[1 : len(name)-1]
+		} else if strings.Contains(name, ":") {
+			return "", "", false
+		}
+	}
+
+	if port == "" {
+		switch strings.ToLower(scheme) {
+		case "https":
+			port = "443"
+		case "http":
+			port = "80"
+		}
+	}
+
+	if name == "" || port == "" || strings.ContainsAny(name, "[]") {
+		return "", "", false
+	}
+
+	return strings.ToLower(name), port, true
+}
+
+// admitRemote is the token decision on a remote request other than one for
 // the OAuth callback (ADR 0021): it may reach mcpPath, and nothing else,
 // if and only if its bearer resolves, under the same one-header rule as a
-// local request, to a remote scoped token. It returns that Client, or which
-// check refused the request.
+// local request, to a remote scoped token (an OAuth grant's access token
+// resolves to one). It returns that Client, or which check refused the
+// request. The authorization server's routes are host's other admission.
 //
 // The bearer is resolved before the path is looked at, on every path, so a
 // refusal does the same work whatever the path and the token: a caller
@@ -98,16 +203,25 @@ func (gs guards) admitRemote(r *http.Request) (clienttoken.Client, string) {
 	return c, ""
 }
 
-// remoteKey is the request context key under which host puts the Client of a
-// remote request it admitted.
+// admission is how host let a remote request in.
+type admission struct {
+	// client is the remote token's Client; zero for a public admission.
+	client clienttoken.Client
+	// public is an admission, with no token, to one of the authorization
+	// server's routes.
+	public bool
+}
+
+// remoteKey is the request context key under which host puts the admission
+// of a remote request it let in.
 type remoteKey struct{}
 
-// remoteFrom returns the Client host admitted ctx's remote request with;
+// remoteFrom returns the admission host let ctx's remote request in with;
 // false for a local request.
-func remoteFrom(ctx context.Context) (clienttoken.Client, bool) {
-	c, ok := ctx.Value(remoteKey{}).(clienttoken.Client)
+func remoteFrom(ctx context.Context) (admission, bool) {
+	a, ok := ctx.Value(remoteKey{}).(admission)
 
-	return c, ok
+	return a, ok
 }
 
 // guard is the per-route part of design §7.7's guard column. The loopback
@@ -124,11 +238,29 @@ type guard struct {
 	// adminOnly refuses a valid scoped token with 403; only the default
 	// token passes. It needs bearer, which refuses anything else with 401.
 	adminOnly bool
-	// remote lets in a remote request that host admitted; any other route
-	// answers one 404, as host does, so the route table and host's path
-	// check must agree. It needs bearer, which then takes the Client host
-	// resolved instead of resolving the token again.
+	// remote lets in a remote request that host admitted with a token; any
+	// other route answers it one 404, as host does, so the route table and
+	// host's path check must agree. It needs bearer, which then takes the
+	// Client host resolved instead of resolving the token again.
 	remote bool
+	// public lets in a remote request that host admitted, with no token, to
+	// one of the authorization server's routes; any other route answers it
+	// one 404. It has no Origin check and no bearer (design §7.11): the
+	// token endpoint is called by a cloud agent's servers, and the handlers
+	// do their own checks.
+	public bool
+}
+
+// admits reports whether g lets in a remote request host admitted with a.
+// Each admission reaches only routes of its own kind: a public one never
+// reaches /mcp, /ui/, or /admin/, and a token one never reaches the
+// authorization server's routes.
+func (g guard) admits(a admission) bool {
+	if a.public {
+		return g.public
+	}
+
+	return g.remote
 }
 
 // adminScopeMessage is the 403 body a scoped token gets on /admin/.
@@ -139,7 +271,7 @@ func (gs guards) wrap(g guard, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		remote, isRemote := remoteFrom(r.Context())
 
-		if isRemote && !g.remote {
+		if isRemote && !g.admits(remote) {
 			gs.reject(r, "remote_route")
 			http.NotFound(w, r)
 
@@ -165,7 +297,7 @@ func (gs guards) wrap(g guard, next http.Handler) http.Handler {
 		}
 
 		if g.bearer {
-			c, ok := remote, isRemote
+			c, ok := remote.client, isRemote
 
 			if !isRemote {
 				c, ok = gs.resolveBearer(r)

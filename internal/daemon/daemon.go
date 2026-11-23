@@ -14,6 +14,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"slices"
@@ -33,6 +34,7 @@ import (
 	"github.com/atomicpages/wayfindr/internal/gateway"
 	"github.com/atomicpages/wayfindr/internal/httpclient"
 	"github.com/atomicpages/wayfindr/internal/httpd"
+	"github.com/atomicpages/wayfindr/internal/oauthserver"
 	"github.com/atomicpages/wayfindr/internal/paths"
 	"github.com/atomicpages/wayfindr/internal/resolve"
 	"github.com/atomicpages/wayfindr/internal/secrets"
@@ -86,6 +88,11 @@ type Options struct {
 	// sends through (ADR 0021). Nil means the shared outbound client; tests
 	// pass one that trusts their server's certificate.
 	RemoteTestClient *http.Client
+	// OAuthClient is the HTTP client the authorization server fetches
+	// clients' ID metadata documents with (ADR 0022). Nil means
+	// httpclient.PublicOnly(), which refuses private addresses; tests pass
+	// one that reaches their TLS server.
+	OAuthClient *http.Client
 	// RemoteTestTimeout bounds one connection test, both probes together.
 	// Zero means 10 seconds; tests shorten it.
 	RemoteTestTimeout time.Duration
@@ -114,6 +121,10 @@ type Daemon struct {
 	health   health
 	calls    *callLog
 	tokens   *clientTokens
+	// oauth is Wayfindr's authorization server (ADR 0022), whose handlers
+	// httpd serves; the admin API reaches its pending authorizations
+	// through an adapter over it.
+	oauth *oauthserver.Server
 	// telemetry counts usage and sends the usage report while
 	// telemetry.enabled is on (ADR 0020).
 	telemetry *telemetry.Reporter
@@ -400,7 +411,48 @@ func New(ctx context.Context, opts Options) (d *Daemon, err error) {
 		return nil, err
 	}
 
-	tokens := &clientTokens{store: st, userID: userID, registry: registry, clock: clock, log: log}
+	tokens := &clientTokens{
+		store: st, userID: userID, registry: registry, clock: clock, log: log,
+		clients: map[string]struct{}{}, live: map[string]struct{}{},
+	}
+
+	// Likewise every OAuth grant's access token, before httpd serves, so a
+	// connected cloud agent is not refused while the daemon starts.
+	if err := tokens.applyOAuth(ctx, cfg.Server); err != nil {
+		return nil, err
+	}
+
+	// Wayfindr's authorization server (ADR 0022). It reads the running
+	// [server] table on every request, so a reload turns it on and off.
+	running := func() config.Server {
+		if c := cfgState.current(); c != nil {
+			return c.Server
+		}
+
+		return config.Server{}
+	}
+	// The approve page is on server.listen, the address `wayfindr ui`
+	// opens, so the console's cookie is sent; a change to it needs a
+	// restart, so the startup config's is the one served.
+	listen := cfg.Server.Listen
+	// Clients' documents are fetched through the public-only client; tests
+	// pass their own.
+	oauthClient := opts.OAuthClient
+
+	if oauthClient == nil {
+		oauthClient = httpclient.PublicOnly()
+	}
+
+	oauth := oauthserver.New(oauthserver.Options{
+		Server: running,
+		Grants: tokens,
+		ApproveURL: func(id string) string {
+			return "http://" + listen + webui.ApprovePath + "?req=" + url.QueryEscape(id)
+		},
+		Client: oauthClient,
+		Now:    clock.Now,
+		Logger: log,
+	})
 
 	// The connection test of a cloud agent's path goes out through the
 	// shared outbound client, as a url connector without a [tls] table does.
@@ -455,15 +507,17 @@ func New(ctx context.Context, opts Options) (d *Daemon, err error) {
 		Search:        adminSearch(gw),
 		Tools:         adminTools(manager, cfgState.toolPolicy),
 		Tokens:        tokens,
+		OAuth:         oauthRequests{server: oauth, tokens: tokens},
 		UILogin: func() admin.UILogin {
 			path, expires := sessions.IssueLogin()
 
 			return admin.UILogin{Path: path, ExpiresAt: expires}
 		},
-		AddConnector: writer.add,
-		SetPublicURL: writer.setPublicURL,
-		TestRemote:   remoteTester.test,
-		Logger:       log,
+		AddConnector:    writer.add,
+		SetPublicURL:    writer.setPublicURL,
+		SetOAuthEnabled: writer.setOAuthEnabled,
+		TestRemote:      remoteTester.test,
+		Logger:          log,
 	})
 	// The console reads through the admin API in process, so it and the
 	// CLI get the same answers (design §7.10).
@@ -491,6 +545,23 @@ func New(ctx context.Context, opts Options) (d *Daemon, err error) {
 			OAuthCallback: http.HandlerFunc(flows.HandleCallback),
 			Admin:         adminAPI,
 			UI:            console,
+
+			OAuthResourceMetadata: http.HandlerFunc(oauth.ResourceMetadata),
+			OAuthServerMetadata:   http.HandlerFunc(oauth.ServerMetadata),
+			OAuthAuthorize:        http.HandlerFunc(oauth.Authorize),
+			OAuthToken:            http.HandlerFunc(oauth.Token),
+		},
+		// While [server.oauth] is on, a remote /mcp request without a token
+		// gets the 401 that names this URL, and the authorization server's
+		// routes are served to remote requests.
+		ResourceMetadataURL: func() string {
+			s := running()
+
+			if !s.OAuth.Enabled || s.Issuer() == "" {
+				return ""
+			}
+
+			return oauthserver.ResourceMetadataURL(s.Issuer())
 		},
 	})
 
@@ -516,6 +587,7 @@ func New(ctx context.Context, opts Options) (d *Daemon, err error) {
 		health:    hl,
 		calls:     calls,
 		tokens:    tokens,
+		oauth:     oauth,
 		telemetry: reporter,
 		clock:     clock,
 		jitter:    jitter,
@@ -750,6 +822,19 @@ func (d *Daemon) Reload(ctx context.Context, next *config.Config) {
 	// the status must not list a configured connector's credential as
 	// orphaned meanwhile.
 	d.cfgState.applying(next)
+	// Before any connect waits too: a change that suspends OAuth grants
+	// (OAuth off, another public_url, a client removed) stops their access
+	// tokens at once.
+	if err := d.tokens.applyOAuth(ctx, next.Server); err != nil {
+		d.log.Error().Err(err).Msg("apply oauth grants; their access tokens are refused until a retry, made each minute, succeeds")
+	}
+	// Likewise nothing armed, pending, or claimed, and no code not yet
+	// exchanged, outlives the OAuth settings it was made under, even when a
+	// later reload brings them back: the user selects Connect a client
+	// again.
+	if d.cfg != nil && oauthChanged(d.cfg.Server, next.Server) {
+		d.oauth.Disarm()
+	}
 	// Once the running config is next: a late callback must not store a
 	// token for a connector that is gone, or one granted under its old url
 	// or [auth] table. auth decides which flows that ends.
@@ -810,6 +895,8 @@ type configState struct {
 	secretUsers map[string][]string
 	// publicURL is the running config's server.public_url (ADR 0021).
 	publicURL string
+	// oauth is the running config's server.oauth (ADR 0022).
+	oauth config.OAuth
 }
 
 func (s *configState) snapshot() admin.ConfigState {
@@ -822,6 +909,7 @@ func (s *configState) snapshot() admin.ConfigState {
 		ConfigError: s.err,
 		SecretUsers: s.secretUsers,
 		PublicURL:   s.publicURL,
+		OAuth:       s.oauth,
 	}
 }
 
@@ -835,6 +923,7 @@ func (s *configState) applying(cfg *config.Config) {
 	s.profiles = cfg.Profiles
 	s.secretUsers = cfg.SecretUsers()
 	s.publicURL = cfg.Server.PublicURL
+	s.oauth = cfg.Server.OAuth
 	s.err = ""
 }
 

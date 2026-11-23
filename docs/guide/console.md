@@ -32,8 +32,8 @@ sign in again.
 | A connector   | Every tool its upstream serves now, its class, and whether its tools list exposes it.               | Open a tool to read its definition as the upstream sends it. Sign in again, or sign out. |
 | Calls         | The call log, newest first, filtered by connector or by calls that did not end OK.                  | Open a call that failed to read its error.                                               |
 | Search        | What `search_tools` returns to a client for a query, with each tool's word and meaning ranks.       |                                                                                          |
-| Client tokens | Your scoped client tokens, their connectors, which are remote, and when each was last used.         | Create a token (shown once), revoke one.                                                 |
-| Cloud agents  | The remote tokens you made for cloud agents, their connectors, and when each was last used.         | Connect Grok Bot or Muse step by step, test the connection, revoke a token.              |
+| Client tokens | Your scoped client tokens and OAuth grants (marked `oauth` with the client's host), their connectors, which are remote, and when each was last used. | Create a token (shown once), revoke a token or a grant.                          |
+| Cloud agents  | The remote tokens and OAuth grants you made for cloud agents, their connectors, and when each was last used. | Connect Grok Bot, Muse, or ChatGPT step by step, test the connection, revoke a token or grant. |
 
 A connector whose name matches a brand (`gmail`, `github-work`) shows that
 brand's logo, which your browser loads from [theSVG](https://thesvg.org) on
@@ -84,7 +84,7 @@ connector again.
 ## Connecting a cloud agent
 
 The **Cloud agents** page walks you through connecting an agent that runs in the
-cloud, such as Grok Bot or Muse (ChatGPT isn't supported yet). You pick the
+cloud, such as Grok Bot, Muse, or ChatGPT. For Grok Bot and Muse, you pick the
 agent and the connectors it may use, save the public `https` address your tunnel
 (ngrok, Cloudflare Tunnel, or Tailscale Funnel) gives you, and create a remote
 token, which is shown once. **Test connection** then checks the whole path from
@@ -92,6 +92,28 @@ the internet to the daemon, and the page ends with text to copy into the agent.
 Keep the page open until the agent is set up: Wayfindr keeps only a hash of the
 token, so leaving the page loses it. Revoke a token from the same page's list. The
 [Cloud agents guide](./cloud-agents) covers the tunnel and each agent in full.
+
+**ChatGPT** has no token. Its path asks for the public address, then turns on
+sign-in (OAuth) with one button, which saves `server.oauth.enabled` in your config
+file and arms a connection. The last step shows what to enter in ChatGPT, a
+**Connect a client** button, and, once armed, "Ready for ChatGPT until" a time 10
+minutes ahead. The arm is what lets a sign-in through. You can **Test the
+connection** and turn sign-in off from the same step. While sign-in is on, the
+first step shows **Connect a client** on the ChatGPT row too, so you can connect
+again without going through the steps.
+
+When ChatGPT sends your browser to Wayfindr, it lands on the console's **approve
+page**, on this computer. It shows the client and its host, the host your browser
+returns to, when the request started, and the IP address your tunnel reported,
+labelled "reported by your tunnel". It warns you to approve only if you clicked
+Connect in the client a few minutes ago, and to choose Deny if someone sent you the
+link. You keep or change the name, tick the connectors, and select **Approve** or
+**Deny**; your browser then goes back to the client. A plain page with a
+**Continue** button may come first, because your browser arrives from another site
+and the console doesn't know you yet: select **Continue**. If it comes back, you
+aren't signed in: run `wayfindr ui`, then select **Continue** again. See
+[ChatGPT](./cloud-agents#chatgpt) for the steps, and
+[Security](./security#cloud-agents-that-sign-in) for what the sign-in opens.
 
 For Grok Bot, use a personal Bot, not a Team Bot: everyone on a team uses a Team
 Bot's token. For Muse, paste the token only into Muse's secure credential

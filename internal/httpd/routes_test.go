@@ -48,6 +48,12 @@ func stubHandlers() httpd.Handlers {
 		OAuthCallback: stub("oauth-callback"),
 		Admin:         adminStub(),
 		UI:            treeStub("ui"),
+		// The authorization server's handlers echo the method and path, so a
+		// test sees which of the two metadata paths and which method came.
+		OAuthResourceMetadata: treeStub("oauth-resource"),
+		OAuthServerMetadata:   treeStub("oauth-server"),
+		OAuthAuthorize:        treeStub("oauth-authorize"),
+		OAuthToken:            treeStub("oauth-token"),
 	}
 }
 
@@ -89,6 +95,9 @@ type route struct {
 	bearer     bool
 	sameOrigin bool
 	anyHost    bool
+	// public is the authorization server's guard: no Origin check, and a
+	// remote request only while it is on (public_test.go).
+	public bool
 }
 
 // routeTable is design §7.7, row for row (/mcp expanded per method, and
@@ -113,6 +122,12 @@ func routeTable() []route {
 		{method: "GET", path: "/ui/", want: "ui GET /ui/"},
 		{method: "GET", path: "/ui/calls?errors=1", want: "ui GET /ui/calls"},
 		{method: "POST", path: "/ui/tokens", want: "ui POST /ui/tokens", sameOrigin: true},
+		// The authorization server's routes (design §7.11).
+		{method: "GET", path: "/.well-known/oauth-protected-resource", want: "oauth-resource GET /.well-known/oauth-protected-resource", public: true},
+		{method: "GET", path: "/.well-known/oauth-protected-resource/mcp", want: "oauth-resource GET /.well-known/oauth-protected-resource/mcp", public: true},
+		{method: "GET", path: "/.well-known/oauth-authorization-server", want: "oauth-server GET /.well-known/oauth-authorization-server", public: true},
+		{method: "GET", path: "/oauth/authorize?client_id=c&state=s", want: "oauth-authorize GET /oauth/authorize", public: true},
+		{method: "POST", path: "/oauth/token", want: "oauth-token POST /oauth/token", public: true},
 	}
 }
 

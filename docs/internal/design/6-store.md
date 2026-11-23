@@ -11,9 +11,13 @@ bookkeeping (`ApplySync`, `DeleteCatalog`, `ToolCounts`, `GetTool`,
 persistence that callers seal (`GetCredential`, `PutCredential`,
 `DeleteCredential`, `ListCredentialConnectors`, `GetSecret`, `PutSecret`,
 `DeleteSecret`, `HasSealedData`, `GetMetadata`, `PutMetadata`), the call log
-(`RecordCall`, `ListCalls`, `PruneCalls`), and scoped client tokens, digests
+(`RecordCall`, `ListCalls`, `PruneCalls`), scoped client tokens, digests
 only (`CreateClientToken`, `ListClientTokens`, `DeleteClientToken`,
-`TouchClientTokens`). Why they are shaped as they are:
+`TouchClientTokens`), and OAuth grants and their tokens, digests only
+(`CreateOAuthGrant`, `GetOAuthGrant`, `ListOAuthGrants`, `DeleteOAuthGrant`,
+`GetOAuthToken`, `ListOAuthAccessTokens`, `IssueOAuthTokens`,
+`RotateOAuthTokens`, `TouchOAuthGrants`, `PruneOAuth`; their contracts are in
+[§7.11](7.11-oauthserver.md)). Why they are shaped as they are:
 
 - **`Tool`** holds `Connector`, `Name`, `Definition json.RawMessage`,
   `ContentHash`, `Embedding`, `EmbeddingModel`, and the parsed fields the index

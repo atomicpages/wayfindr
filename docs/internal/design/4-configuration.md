@@ -191,7 +191,15 @@ tunnel serves: no path but `/`, no query, fragment, or userinfo
 informational, so `config.Diff` ignores it and it needs no restart: the daemon's
 `configState` takes it from each applied config, and `GET
 /admin/server/public-url` reads it there. No guard compares a request with it.
-`config.ListenAddress` reads `listen` alone and never validates it.
+`config.ListenAddress` reads `listen` alone and never validates it. Clearing it
+while `server.oauth.enabled` is true is refused (below).
+
+**Authorization server.** `[server.oauth]` (ADR 0022) is `config.OAuth` at
+`Server.OAuth`; its default, its validation rules, `Server.Issuer()`, and the
+`SetPublicURL` refusal while it is on are in [§7.11](7.11-oauthserver.md).
+Like `public_url`, `config.Diff` ignores the table: a reload applies it
+through the daemon's token service and the authorization server, which reads
+the running config on every request.
 
 `config.Diff(old, new)` produces per-connector `Added`, `Removed`, `URLChanged`,
 `Changed`, and `Unchanged` sets, plus `EmbeddingChanged`. It also lists
@@ -208,11 +216,15 @@ byte, re-parses the result, and refuses (`*config.Error`, Kinds `conflict`,
 `unsafe`, `invalid`) any edit that would read differently than written or change
 another connector; the CLI writes the result with `newfile.Replace`. The daemon
 is the third writer: `POST /admin/connectors` appends a table the same way, for
-the web console (ADR 0017, [§7.8](7.8-daemon.md)), and `PUT
+the web console (ADR 0017, [§7.8](7.8-daemon.md)), `PUT
 /admin/server/public-url` sets or clears `server.public_url` with
 `config.SetPublicURL`, which rewrites that one line (or adds a `[server]` table)
 under the same checks and refuses a `server` written as a dotted key or inline
-table (`CaseServerNotTable`). Both daemon writes share one lock. Every writer passes the bytes
+table (`CaseServerNotTable`). `PUT /admin/server/oauth` turns
+`server.oauth.enabled` on or off with `config.SetOAuthEnabled` the same way
+([§7.11](7.11-oauthserver.md)); it never edits `clients`. All three daemon
+writes share one lock. Every
+writer passes the bytes
 it read as `newfile.Replace`'s `expect`, so a write that would lose another's
 edit fails with `newfile.ErrChanged` instead; the check and the rename are two
 steps, so two writes in the same instant can still lose one.

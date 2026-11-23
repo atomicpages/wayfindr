@@ -23,11 +23,20 @@
 # sends Host as written in the URL (the default port 443 is not appended).
 #   CONFORMANCE_URL=http://127.0.0.1:7777/mcp CONFORMANCE_TOKEN=... make conformance
 #
+# The throwaway daemon also runs its OAuth authorization server ([server.oauth],
+# ADR 0022) at a public_url that a tunnel stand-in (conformancekit tunnel)
+# serves over https, and the suite's authorization-server scenario
+# authorization-server-metadata-endpoint runs against it (see
+# docs/internal/compat.md). Not available in existing-server mode.
+#
 # Results go to bin/conformance/<version>/. The exit status is non-zero if
 # any version fails or warns on a check not listed in its expected-failures
 # file, scripts/conformance-baseline/<version>.yml (per-check entries,
 # <scenario>:<check-id>; the file's header documents the format), or if a
-# listed check now passes.
+# listed check now passes. The authorization server leg has no baseline: it
+# fails on any result that is not SUCCESS, and also when it produced no
+# checks.json or no SUCCESS at all. CONFORMANCE_ARGS does not apply to it: it
+# always runs its one scenario, and is skipped only in existing-server mode.
 #
 # Environment:
 #   WAYFINDR_BIN           wayfindr binary (default bin/wayfindr); unused in
@@ -36,10 +45,12 @@
 #   CONFORMANCE_TOKEN      bearer token for CONFORMANCE_URL (needs CONFORMANCE_URL)
 #   CONFORMANCE_VERSIONS   protocol versions to run (default: all three)
 #   CONFORMANCE_PKG        npm package (default pinned below)
-#   CONFORMANCE_ARGS       scenario selection (default "--suite all", which
-#                          adds the draft and pending scenarios that cover
-#                          the 2026-07-28 stateless wire); for example
-#                          "--scenario tools-list"
+#   CONFORMANCE_ARGS       scenario selection for the /mcp runs (default
+#                          "--suite all", which adds the draft and pending
+#                          scenarios that cover the 2026-07-28 stateless
+#                          wire); for example "--scenario tools-list". It
+#                          does not narrow the authorization server leg,
+#                          which always runs its one scenario
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -100,12 +111,13 @@ command -v npx >/dev/null 2>&1 || { echo "conformance: npx not found; install No
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/wayfindr-conformance.XXXXXX")
 daemon_pid=
 proxy_pid=
+tunnel_pid=
 cleanup() {
 	status=$?
-	for pid in $proxy_pid $daemon_pid; do
+	for pid in $tunnel_pid $proxy_pid $daemon_pid; do
 		kill "$pid" 2>/dev/null || true
 	done
-	for pid in $proxy_pid $daemon_pid; do
+	for pid in $tunnel_pid $proxy_pid $daemon_pid; do
 		wait "$pid" 2>/dev/null || true
 	done
 	if [ "$status" -ne 0 ] && [ -f "$tmp/daemon.log" ]; then
@@ -118,6 +130,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+trap 'exit 129' HUP
+trap 'exit 131' QUIT
 
 # wayfindr_not_found reports whether the 404 whose headers and body are in the
 # two files is the one Wayfindr gives (httpd: http.NotFound) and not a tunnel
@@ -135,8 +149,27 @@ wayfindr_not_found() {
 kit=$tmp/conformancekit
 go build -o "$kit" ./internal/testutil/cmd/conformancekit
 
+# pick_port prints a free loopback port that is none of its arguments. freeport
+# can hand out the same port twice in a row, so the daemon, proxy, and tunnel
+# each ask with the ports already chosen.
+pick_port() {
+	while :; do
+		candidate=$("$kit" freeport)
+		taken=
+		for used in "$@"; do
+			if [ "$candidate" = "$used" ]; then
+				taken=1
+			fi
+		done
+		if [ -z "$taken" ]; then
+			break
+		fi
+	done
+	echo "$candidate"
+}
+
 if [ -n "$url" ]; then
-	proxy_port=$("$kit" freeport)
+	proxy_port=$(pick_port)
 	if [ "$scheme" = https ]; then
 		WAYFINDR_CLIENT_TOKEN=$token "$kit" proxy -listen "127.0.0.1:$proxy_port" -target "$authority" -tls &
 	else
@@ -193,15 +226,19 @@ else
 	WAYFINDR_CLIENT_TOKEN=wf_conformance_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
 	export WAYFINDR_SECRET_KEY WAYFINDR_CLIENT_TOKEN
 
-	port=$("$kit" freeport)
-	proxy_port=$("$kit" freeport)
-	while [ "$proxy_port" = "$port" ]; do proxy_port=$("$kit" freeport); done
+	port=$(pick_port)
+	proxy_port=$(pick_port "$port")
+	tunnel_port=$(pick_port "$port" "$proxy_port")
 
 	# init never overwrites an existing config, so write ours first.
 	mkdir -p "$tmp/config"
 	cat >"$WAYFINDR_CONFIG" <<EOF
 [server]
 listen = "127.0.0.1:$port"
+public_url = "https://127.0.0.1:$tunnel_port"
+
+[server.oauth]
+enabled = true
 
 [storage]
 driver = "sqlite"
@@ -217,20 +254,26 @@ EOF
 	daemon_pid=$!
 	"$kit" proxy -listen "127.0.0.1:$proxy_port" -target "127.0.0.1:$port" &
 	proxy_pid=$!
+	"$kit" tunnel -listen "127.0.0.1:$tunnel_port" -target "127.0.0.1:$port" -cert-out "$tmp/tunnel.pem" &
+	tunnel_pid=$!
 
 	ready=
 	i=0
 	while [ $i -lt 100 ]; do
 		if curl -fsS "http://127.0.0.1:$port/healthz" >/dev/null 2>&1 &&
-			curl -fsS "http://127.0.0.1:$proxy_port/healthz" >/dev/null 2>&1; then
+			curl -fsS "http://127.0.0.1:$proxy_port/healthz" >/dev/null 2>&1 &&
+			[ -s "$tmp/tunnel.pem" ] &&
+			curl -sS -o /dev/null --cacert "$tmp/tunnel.pem" "https://127.0.0.1:$tunnel_port/.well-known/oauth-authorization-server" >/dev/null 2>&1; then
 			ready=1
 			break
 		fi
 		kill -0 "$daemon_pid" 2>/dev/null || break
+		kill -0 "$proxy_pid" 2>/dev/null || { echo "conformance: the proxy exited before the daemon became healthy" >&2; exit 1; }
+		kill -0 "$tunnel_pid" 2>/dev/null || { echo "conformance: the tunnel stand-in exited before the daemon became healthy" >&2; exit 1; }
 		sleep 0.2
 		i=$((i + 1))
 	done
-	[ -n "$ready" ] || { echo "conformance: daemon did not become healthy" >&2; exit 1; }
+	[ -n "$ready" ] || { echo "conformance: daemon did not become healthy (or exited)" >&2; exit 1; }
 	echo "conformance: daemon on 127.0.0.1:$port, suite via proxy on 127.0.0.1:$proxy_port"
 	suite_url="http://127.0.0.1:$proxy_port/mcp"
 fi
@@ -241,7 +284,7 @@ for v in $versions; do
 	echo
 	echo "=== conformance $v"
 	mkdir -p "$results/$v"
-	if npx -y "$pkg" server \
+	if env -u WAYFINDR_SECRET_KEY -u WAYFINDR_CLIENT_TOKEN npx -y "$pkg" server \
 		--url "$suite_url" \
 		--spec-version "$v" \
 		--expected-failures "$root/scripts/conformance-baseline/$v.yml" \
@@ -253,9 +296,46 @@ for v in $versions; do
 	fi
 done
 
+# The authorization server leg, only against the throwaway daemon, whose
+# config turned [server.oauth] on. The suite reaches the daemon the way a cloud
+# agent does, through the tunnel stand-in: https at public_url, forwarded, so
+# the daemon sees a remote request. NODE_EXTRA_CA_CERTS is the tunnel's
+# certificate. The suite has no expected-failures option for this command and
+# exits 0 on a warning, so any check that is not a success fails the run here,
+# and so does a run that wrote no checks.json or no success (a pass needs a
+# positive result, not only the absence of a bad one). CONFORMANCE_ARGS does
+# not apply: the leg always runs its one scenario.
+if [ -z "$url" ]; then
+	echo
+	echo "=== conformance authorization server"
+	mkdir -p "$results/authorization"
+	if ! env -u WAYFINDR_SECRET_KEY -u WAYFINDR_CLIENT_TOKEN NODE_EXTRA_CA_CERTS="$tmp/tunnel.pem" npx -y "$pkg" authorization \
+		--url "https://127.0.0.1:$tunnel_port" \
+		--scenario authorization-server-metadata-endpoint \
+		--output-dir "$results/authorization"; then
+		echo "=== conformance authorization server: FAIL (the suite exited non-zero)"
+		failed="$failed authorization"
+	elif grep -rhE '"status": "(FAILURE|WARNING|SKIPPED)"' "$results/authorization"; then
+		echo "=== conformance authorization server: FAIL (a check did not succeed)"
+		failed="$failed authorization"
+	elif [ -z "$(find "$results/authorization" -name checks.json 2>/dev/null)" ]; then
+		echo "=== conformance authorization server: FAIL (no checks.json under $results/authorization)"
+		failed="$failed authorization"
+	elif ! grep -rqE '"status": "SUCCESS"' "$results/authorization"; then
+		echo "=== conformance authorization server: FAIL (no check reported SUCCESS)"
+		failed="$failed authorization"
+	else
+		echo "=== conformance authorization server: pass"
+	fi
+fi
+
 echo
 if [ -n "$failed" ]; then
 	echo "conformance: unexpected failures at:$failed (results in bin/conformance/)" >&2
 	exit 1
 fi
-echo "conformance: all versions match the baseline (results in bin/conformance/)"
+if [ -z "$url" ]; then
+	echo "conformance: every version matches its baseline and the authorization server leg passed (results in bin/conformance/)"
+else
+	echo "conformance: every version matches its baseline; the authorization server leg runs only against the throwaway daemon (results in bin/conformance/)"
+fi

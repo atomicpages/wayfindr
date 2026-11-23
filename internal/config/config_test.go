@@ -39,7 +39,7 @@ func TestLoadPRDExample(t *testing.T) {
 	}
 
 	want := &config.Config{
-		Server:  config.Server{Listen: "127.0.0.1:7777"},
+		Server:  config.Server{Listen: "127.0.0.1:7777", OAuth: config.OAuth{Clients: []string{config.DefaultOAuthClient}}},
 		Storage: config.Storage{Driver: "sqlite", DSN: "/home/tester/.local/share/wayfindr/wayfindr.db"},
 		Embedding: &config.Embedding{
 			BaseURL:    "http://localhost:11434/v1",
@@ -112,7 +112,7 @@ func TestParseDefaults(t *testing.T) {
 	}
 
 	want := &config.Config{
-		Server:     config.Server{Listen: "127.0.0.1:7777"},
+		Server:     config.Server{Listen: "127.0.0.1:7777", OAuth: config.OAuth{Clients: []string{config.DefaultOAuthClient}}},
 		Storage:    config.Storage{Driver: "sqlite", DSN: filepath.Join(dataDir, "wayfindr.db")},
 		Index:      config.Index{RefreshInterval: dur(time.Hour)},
 		Calls:      config.Calls{Retention: dur(720 * time.Hour)},

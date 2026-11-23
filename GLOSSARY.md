@@ -23,17 +23,21 @@ wrong, fix it here first.
   (`clienttoken.Client`: the token's name and the connectors it allows),
   which the call log records as the token name.
 - **Cloud agent** — an always-on agent that runs in a vendor's cloud, not on the
-  user's machine: Grok Bot and Muse (Meta) work; ChatGPT can't sign in with a
-  bearer token yet. It is a client of
-  Wayfindr, over HTTPS through a tunnel the user runs, with a remote client
-  token (ADR 0021). Wayfindr has no adapter for it and never calls it. Say
-  _cloud agent_, not _bot_ (Grok's word for one product) or _remote client_.
+  user's machine: Grok Bot, Muse (Meta), and ChatGPT. It is a client of
+  Wayfindr, over HTTPS through a tunnel the user runs: Grok Bot and Muse with a
+  remote client token (ADR 0021), ChatGPT with an OAuth grant from Wayfindr's
+  authorization server (ADR 0022). Wayfindr has no adapter for it and
+  never calls it. Say _cloud agent_, not _bot_ (Grok's word for one product) or
+  _remote client_.
 - **Public URL** — `server.public_url`: the `https` address the user's tunnel
-  serves the daemon at. It is informational: no request is checked against
-  it. The console uses it for a cloud agent's setup text and to test the
-  connection (ADR 0021). Not the `redirect_uri` of a connector, and not a
-  listen address. Don't call it the _tunnel URL_, _external URL_, or _base
-  URL_. The tunnel itself is the user's, never Wayfindr's.
+  serves the daemon at. The console uses it for a cloud agent's setup text and
+  to test the connection (ADR 0021). The host guard never checks a request
+  against it. While `[server.oauth]` is on, it is the issuer of Wayfindr's
+  authorization server (without a trailing slash), and `<public_url>/mcp` is the
+  resource every OAuth grant is bound to, so changing it suspends OAuth grants
+  until it is set back (ADR 0022). Not the `redirect_uri` of a
+  connector, and not a listen address. Don't call it the _tunnel URL_, _external
+  URL_, or _base URL_. The tunnel itself is the user's, never Wayfindr's.
 - **Shim** — `wayfindr stdio`: a thin stdio↔HTTP forwarder for clients that only
   speak stdio. It holds no state and starts the daemon if it is not running.
   On every request it sends the project scope it finds (`Wayfindr-Scope`)
@@ -204,11 +208,12 @@ wayfindr stdio`), else the entry to add to the harness's config file. All
 - **Secret** — a sensitive value stored encrypted in the store, referenced from
   config as `${secret:<name>}`. Environment values are referenced as
   `${env:<NAME>}`.
-- **Client token** — a bearer token clients present to the daemon: the
-  default client token or a scoped client token. The daemon resolves it to
-  a client on every request, and it is the outer limit of what that client
-  can use: a profile or project scope only narrows within it (ADR 0012).
-  Not to be confused with upstream OAuth tokens.
+- **Client token** — a bearer token clients present to the daemon: the default
+  client token or a scoped client token. The daemon resolves it to a client on
+  every request, and it is the outer limit of what that client can use: a
+  profile or project scope only narrows within it (ADR 0012). An OAuth grant's
+  access token is presented the same way and resolves as a remote client token
+  does (ADR 0022). Not to be confused with upstream OAuth tokens.
 - **Default client token** — the client token `wayfindr init` generates
   (`wf_…`, in `<data>/client-token` or `WAYFINDR_CLIENT_TOKEN`). It can use
   every connector and the admin API. Its name, in the call log, is
@@ -219,29 +224,33 @@ wayfindr stdio`), else the entry to add to the harness's config file. All
   if not configured, checked before the profile, project scope, and tools
   list, and the admin API refuses it with 403. Its connectors can't be
   edited: revoke it and create another (ADR 0012).
-- **Remote client token** — a scoped client token created with `--remote` (or
-  in the console's Cloud agents page), for a cloud agent. Only it lets a
-  remote request reach `/mcp`. In every other way it is a scoped token: it
-  reaches only its connectors, the admin API refuses it, and it works from
-  the local machine too. `remote` is stored with the token's digest, is
-  fixed at creation, and can't be set on the default client token; to
-  change it, revoke the token and create another (ADR 0021). Shown as
-  `REMOTE` by `wayfindr token list`. Don't call it a _tunnel token_ or
-  _public token_.
+- **Remote client token** — a scoped client token created with `--remote` (or in
+  the console's Cloud agents page), for a cloud agent. Only it, or an OAuth
+  grant's access token (ADR 0022), which resolves to the same kind of
+  client, lets a remote request reach `/mcp`. In every other way it is a scoped
+  token: it reaches only its connectors, the admin API refuses it, and it works
+  from the local machine too. `remote` is stored with the token's digest, is
+  fixed at creation, and can't be set on the default client token; to change it,
+  revoke the token and create another (ADR 0021). Shown as `REMOTE` by
+  `wayfindr token list`. Don't call it a _tunnel token_ or _public token_.
 - **Remote request** — a request that carries a forwarding header (`Forwarded`,
   `Via`, `X-Forwarded-*`, `X-Real-IP`, `CF-Connecting-IP`), or whose `Host`
-  isn't a loopback name with the daemon's port. The host guard decides
-  alone (`httpd`). On `/mcp` it proceeds only with a remote client token;
-  any other token, or none, gets `404 page not found`, never `401`. Every
-  other route but the callback path refuses it with 404, whatever token it
-  carries. A tunnel that adds no forwarding header and keeps a loopback
-  `Host` isn't seen as remote (wayfindr-gz1y). The opposite of a _local
-  request_ (ADR 0021).
+  isn't a loopback name with the daemon's port. The host guard decides alone
+  (`httpd`). On `/mcp` it proceeds only with a remote client token or an OAuth
+  grant's access token; any other token, or none, gets `404 page not found`, or,
+  while `[server.oauth]` is on, `401` with
+  `WWW-Authenticate: Bearer resource_metadata="…"` (ADR 0022). Every
+  other route but the callback path, and the authorization server's routes while
+  it is on, refuses it with 404, whatever token it carries. A tunnel that adds
+  no forwarding header and keeps a loopback `Host` isn't seen as remote
+  (wayfindr-gz1y). The opposite of a _local request_ (ADR 0021).
 - **Connection test** — what the console's Cloud agents page runs after it
   creates a remote token: `POST /admin/remote/test` sends MCP requests to the
-  public URL with the token, and again with none, the way a cloud agent
-  would. Its outcome (`ok`, `not_found`, `proxy_treats_remote_as_local`, …)
-  is a closed set in `admin`; match on it, never on the message.
+  public URL with the token, and again with none, the way a cloud agent would.
+  For ChatGPT, which has no token, it instead checks the 401 challenge and both
+  metadata documents through the public URL (ADR 0022). Its outcome
+  (`ok`, `not_found`, `proxy_treats_remote_as_local`, `metadata_missing`, …) is
+  a closed set in `admin`; match on it, never on the message.
 - **Discovery chain** — the ordered metadata lookups (protected-resource
   metadata, then authorization-server metadata, then legacy fallback) used to
   find an upstream's OAuth endpoints. See ADR 0007.
@@ -254,7 +263,8 @@ wayfindr stdio`), else the entry to add to the harness's config file. All
   with the larger set instead.
 - **OAuth client** — the identity Wayfindr has at a connector's
   authorization server: a configured `client_id`, a CIMD URL, or a DCR
-  registration. Not an MCP client, and not a client token.
+  registration. Not an MCP client, not a client token, and not an allowed
+  client of Wayfindr's own authorization server.
 - **Client authentication** — how Wayfindr proves it is that OAuth client
   at the authorization server's token endpoint: none (the client only
   names itself), a client secret (basic, post, or JWT), a private key JWT,
@@ -287,8 +297,9 @@ wayfindr stdio`), else the entry to add to the harness's config file. All
 
 ## Auth flow
 
-- **Grant** — how a connector gets a token: an auth flow or an unattended
-  grant. A refresh renews a grant's token and is not a grant.
+- **Grant** — how a connector gets a token: an auth flow or an unattended grant.
+  A refresh renews a grant's token and is not a grant. Not an OAuth grant, which
+  Wayfindr's authorization server gives a cloud agent (ADR 0022).
 - **Auth flow** — a grant the user takes part in. _Authorization code_: the
   user opens the authorize URL and consents, and the browser comes back to
   the callback path, where the code is exchanged. _Device code_: the user
@@ -318,9 +329,11 @@ wayfindr stdio`), else the entry to add to the harness's config file. All
   with the flow. Not the OAuth `state`.
 - **Callback path** — `/oauth/callback` (`auth.CallbackPath`), where the
   authorization server sends the browser back. The only path served on a
-  non-loopback `Host` with no token, for a `redirect_uri` through a tunnel
-  (ADR 0007); `/mcp` is served there only for a remote client token (ADR
-  0021).
+  non-loopback `Host` with no token, for a `redirect_uri` through a tunnel (ADR
+  0007), besides the authorization server's routes while `[server.oauth]` is on
+  (ADR 0022); `/mcp` is served there only for a remote client token or
+  an OAuth grant's access token (ADR 0021). Not `/oauth/authorize` or
+  `/oauth/token`, which are Wayfindr's own authorization server's.
 - **Flow phases** — how far a pending flow has got. _Starting_: in the flow
   table from the first moment, so a revoke or a reload can end it, but no
   callback can find it yet. _Armed_: it has its authorize URL and `state`,
@@ -336,6 +349,55 @@ wayfindr stdio`), else the entry to add to the harness's config file. All
   connectors and, for each that comes back `ready`, waits for the catalog
   sync its new session started. A connector has _recovered_ once it has
   reconnected and, if ready, synced once, so it is reported with its tools.
+
+## Wayfindr's authorization server
+
+The terms of ADR 0022. Its limits are in design §7.11.
+
+- **Wayfindr's authorization server** — the OAuth authorization server in
+  the daemon (`oauthserver`, ADR 0022), for cloud agents that sign in with
+  OAuth instead of sending a token, such as ChatGPT. Off unless
+  `[server.oauth] enabled`; it then serves its metadata documents,
+  `/oauth/authorize`, and `/oauth/token` through the tunnel, with the public
+  URL as its issuer. Everywhere else in this glossary, an _authorization
+  server_ is a connector's; say _Wayfindr's authorization server_ for this
+  one.
+- **Allowed client** — a client ID that may start an authorization at
+  Wayfindr's authorization server: a Client ID Metadata Document URL listed
+  in `[server.oauth] clients`, matched exactly (by default ChatGPT's,
+  `https://chatgpt.com/oauth/client.json`). Any other `client_id` gets an
+  error page before the daemon fetches anything. Not an _OAuth client_, which
+  is Wayfindr's own identity at a connector's authorization server.
+- **Arm** — what the console's Connect button does to Wayfindr's
+  authorization server: for a few minutes it keeps the authorization requests
+  that pass its checks pending, until the user's signed-in approve page
+  _claims_ one, which uses the arm up and drops the others. Unarmed,
+  `/oauth/authorize` answers an error page and fetches nothing. Only one
+  request is expected per arm: when more arrived, the claimed one can't be
+  approved, only denied. Turning OAuth off or on, or changing `public_url` or
+  the allowed clients, _disarms_ it, dropping what it kept. Say _arm_ or
+  _Connect_, not _pairing mode_.
+- **Pending authorization** — an authorization request the public
+  `/oauth/authorize` checked, while armed, and keeps in memory, for a few
+  minutes and at most 8 at a time, until the console's approve page claims
+  one (the others are dropped) and the user approves or denies it there. The
+  page shows when it started and the IP the tunnel reported. The browser reaches that page only by the redirect from
+  `/oauth/authorize`, on the daemon's loopback address; the console lists no
+  pending authorizations. The Go type is `oauthserver.Request`. Don't call
+  it a _pending request_ or a _consent request_.
+- **OAuth grant** — a cloud agent's access to Wayfindr, which the user
+  approved on the console's approve page, limited to the connectors picked
+  there and bound to the resource `<public_url>/mcp`. It is a client token to
+  the user: its name is in the name space scoped client tokens use, its
+  access token resolves to a remote scoped client, and `wayfindr token list`
+  shows it as kind `oauth` with the client's host. `wayfindr token revoke`
+  deletes it with its tokens. Its access tokens expire within the hour; its
+  refresh token rotates on every use and never expires; a spent code or
+  refresh token presented again revokes the grant. It is _suspended_, its
+  tokens refused until the change is undone, while the authorization server
+  is off, `public_url` differs from the one it was approved under, or its
+  client is not in `clients`. Not a _grant_, which is how a connector gets
+  its token. Don't call it an _OAuth token_ or _OAuth connection_.
 
 ## Connector states
 

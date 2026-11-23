@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/atomicpages/wayfindr/internal/daemonctl"
+	"github.com/atomicpages/wayfindr/internal/daemonlock"
 	"github.com/atomicpages/wayfindr/internal/paths"
 	"github.com/atomicpages/wayfindr/internal/service"
 )
@@ -46,6 +47,28 @@ func serviceOptions(host Host) service.Options {
 		UID:  os.Getuid(),
 		Env:  host.Env,
 		Run:  run,
+	}
+}
+
+// stopBeforeLoad is a service.Options.BeforeLoad that stops the daemon
+// holding lockFile's lock, as `wayfindr stop` does, just before the unit is
+// loaded. Without it the daemon the unit starts finds that one running and
+// exits cleanly, which neither service manager restarts, so the service
+// would stay down (wayfindr-p9vn). `service install` and `update` both load
+// the unit through it. stopped runs once a daemon has stopped; no daemon
+// running is not an error.
+func stopBeforeLoad(lockFile string, stopped func(daemonlock.Holder) error) func(context.Context) error {
+	return func(ctx context.Context) error {
+		h, err := daemonctl.Stop(ctx, lockFile)
+
+		switch {
+		case errors.Is(err, daemonctl.ErrNotRunning):
+			return nil
+		case err != nil:
+			return fmt.Errorf("stop the running daemon before loading the service: %w", err)
+		}
+
+		return stopped(h)
 	}
 }
 
@@ -87,21 +110,12 @@ key and client token from the keychain or the data directory.`,
 			}
 
 			stopped := false
-			opts.BeforeLoad = func(ctx context.Context) error {
-				h, err := daemonctl.Stop(ctx, p.LockFile())
-
-				switch {
-				case errors.Is(err, daemonctl.ErrNotRunning):
-					return nil
-				case err != nil:
-					return fmt.Errorf("stop the running daemon before loading the service: %w", err)
-				}
-
+			opts.BeforeLoad = stopBeforeLoad(p.LockFile(), func(h daemonlock.Holder) error {
 				stopped = true
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Stopped the daemon (pid %d); the service runs it now.\n", h.PID)
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "Stopped the daemon (pid %d); the service runs it now.\n", h.PID)
 
 				return err
-			}
+			})
 
 			res, err := service.Install(cmd.Context(), opts)
 
