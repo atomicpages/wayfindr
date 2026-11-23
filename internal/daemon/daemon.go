@@ -140,6 +140,11 @@ type Daemon struct {
 	// emb is the [embedding] the embedder was last built from.
 	emb embeddingState
 
+	// fileMu makes each reloadFile one step, reading the file and applying
+	// it: without it, a reload that read the file earlier (the watcher's)
+	// could apply after one that read it later (an add's or a public URL
+	// set's), putting the older config back.
+	fileMu sync.Mutex
 	// mu serializes Reload with itself and with shutdown, and guards cfg
 	// and closed.
 	mu sync.Mutex

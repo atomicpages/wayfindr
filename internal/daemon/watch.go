@@ -194,8 +194,11 @@ func (d *Daemon) reloadOnChange(ctx context.Context, cw *configWatcher) (stop fu
 
 // reloadFile loads the config file with startup's options and reloads it.
 // An invalid config is logged and recorded for the status, and the running
-// config stays.
+// config stays. Reloads of the file run one at a time (fileMu), so the
+// last to read it is the last to apply.
 func (d *Daemon) reloadFile(ctx context.Context) {
+	d.fileMu.Lock()
+	defer d.fileMu.Unlock()
 	next, err := config.Load(ctx, d.paths.ConfigFile, d.loadOpts)
 
 	if err != nil {
