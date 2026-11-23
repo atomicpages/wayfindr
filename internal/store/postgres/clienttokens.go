@@ -24,9 +24,9 @@ func (s *Store) CreateClientToken(ctx context.Context, t store.ClientToken) erro
 		return fmt.Errorf("create client token %s: no creation time", t.Name)
 	}
 
-	tag, err := s.pool.Exec(ctx, `INSERT INTO client_tokens (user_id, name, digest, connectors, created_at)
-		VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-		t.UserID, t.Name, t.Digest[:], t.Connectors, t.CreatedAt.Truncate(time.Millisecond))
+	tag, err := s.pool.Exec(ctx, `INSERT INTO client_tokens (user_id, name, digest, connectors, created_at, remote)
+		VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
+		t.UserID, t.Name, t.Digest[:], t.Connectors, t.CreatedAt.Truncate(time.Millisecond), t.Remote)
 
 	if err != nil {
 		return fmt.Errorf("create client token %s: %w", t.Name, err)
@@ -42,7 +42,7 @@ func (s *Store) CreateClientToken(ctx context.Context, t store.ClientToken) erro
 // ListClientTokens implements store.Store. The "C" collation sorts
 // bytewise, as SQLite does.
 func (s *Store) ListClientTokens(ctx context.Context, userID string) ([]store.ClientToken, error) {
-	rows, err := s.pool.Query(ctx, `SELECT name, digest, connectors, created_at, last_used_at
+	rows, err := s.pool.Query(ctx, `SELECT name, digest, connectors, created_at, last_used_at, remote
 		FROM client_tokens WHERE user_id = $1 ORDER BY name COLLATE "C"`, userID)
 
 	if err != nil {
@@ -59,7 +59,7 @@ func (s *Store) ListClientTokens(ctx context.Context, userID string) ([]store.Cl
 			digest []byte
 		)
 
-		if err := rows.Scan(&t.Name, &digest, &t.Connectors, &t.CreatedAt, &t.LastUsedAt); err != nil {
+		if err := rows.Scan(&t.Name, &digest, &t.Connectors, &t.CreatedAt, &t.LastUsedAt, &t.Remote); err != nil {
 			return nil, fmt.Errorf("list client tokens: %w", err)
 		}
 

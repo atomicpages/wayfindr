@@ -919,8 +919,12 @@ func (m *Manager) connect(ctx context.Context, c *connector) error {
 	client.AddReceivingMiddleware(declineInput())
 	s, err := m.connectBounded(ctx, client, d.transport)
 
-	if err != nil && d.probe != nil {
-		err = d.probe.annotate(err)
+	if d.probe != nil {
+		if err == nil {
+			d.probe.settle()
+		} else {
+			err = d.probe.failure(err)
+		}
 	}
 
 	if err != nil && d.fallsBack() {

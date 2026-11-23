@@ -56,31 +56,46 @@ client token. A client presents it as it would the default one.`,
 }
 
 func newTokenCreateCmd(host Host) *cobra.Command {
-	var connectors []string
+	var (
+		connectors []string
+		remote     bool
+	)
+
 	cmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a scoped client token and print it once",
 		Long: `Create a client token called <name> that can use only the connectors given
 with --connector, each of which must be configured. The token is printed once
 and cannot be read back. To change its connectors, revoke it and create
-another.`,
+another.
+
+With --remote the token may also reach /mcp through a tunnel, which no other
+token can. Make one for a cloud agent, and give it only the connectors that
+agent needs. A remote token is fixed at creation, like its connectors.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			res, err := tokenRequest(cmd.Context(), host, func(ctx context.Context, d *adminDaemon) (admin.TokenCreated, error) {
-				return d.CreateToken(ctx, args[0], connectors)
+				return d.CreateToken(ctx, admin.TokenSpec{Name: args[0], Connectors: connectors, Remote: remote})
 			})
 
 			if err != nil {
 				return err
 			}
 
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Created client token %s. It can use: %s.\n%s\nThis is the only time it is shown; store it where the client can read it.\n",
-				res.Name, strings.Join(res.Connectors, ", "), res.Token)
+			kind := ""
+
+			if res.Remote {
+				kind = " remote"
+			}
+
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Created%s client token %s. It can use: %s.\n%s\nThis is the only time it is shown; store it where the client can read it.\n",
+				kind, res.Name, strings.Join(res.Connectors, ", "), res.Token)
 
 			return err
 		},
 	}
 	cmd.Flags().StringArrayVar(&connectors, "connector", nil, "a connector the token can use (repeatable; at least one)")
+	cmd.Flags().BoolVar(&remote, "remote", false, "let the token reach /mcp through a tunnel (cannot be changed later)")
 	// Registering a flag that exists cannot fail.
 	_ = cmd.MarkFlagRequired("connector")
 
@@ -156,7 +171,7 @@ func writeTokensTable(w io.Writer, res admin.TokenList) error {
 		b.WriteString("No scoped client tokens. Create one with `wayfindr token create <name> --connector <connector>`.\n")
 	} else {
 		tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-		rows := []string{"NAME\tCONNECTORS\tCREATED\tLAST USED"}
+		rows := []string{"NAME\tCONNECTORS\tREMOTE\tCREATED\tLAST USED"}
 
 		for _, t := range res.Tokens {
 			used := "-"
@@ -165,7 +180,13 @@ func writeTokensTable(w io.Writer, res admin.TokenList) error {
 				used = formatTime(*t.LastUsedAt)
 			}
 
-			rows = append(rows, strings.Join([]string{t.Name, strings.Join(t.Connectors, ", "), formatTime(t.CreatedAt), used}, "\t"))
+			remote := "no"
+
+			if t.Remote {
+				remote = "yes"
+			}
+
+			rows = append(rows, strings.Join([]string{t.Name, strings.Join(t.Connectors, ", "), remote, formatTime(t.CreatedAt), used}, "\t"))
 		}
 
 		// A tabwriter over a bytes.Buffer cannot fail.

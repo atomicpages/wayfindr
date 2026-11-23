@@ -53,6 +53,9 @@ type ConfigState struct {
 	// SecretUsers maps each secret the running config refers to to what
 	// refers to it, sorted (config.Config.SecretUsers).
 	SecretUsers map[string][]string
+	// PublicURL is the running config's server.public_url; empty when none
+	// is set (ADR 0021).
+	PublicURL string
 }
 
 // Options is what New needs. The daemon builds it once.
@@ -103,10 +106,21 @@ type Options struct {
 	// (design §2). Nil answers POST /admin/ui/login with 501.
 	UILogin func() UILogin
 	// AddConnector adds a connector to the daemon's config file and reports
-	// it once it has connected (ADR 0017). A refusal is an *AddError. Nil
+	// it once it has connected (ADR 0017). A refusal is a *ConfigError. Nil
 	// answers POST /admin/connectors with 501.
 	AddConnector func(ctx context.Context, spec ConnectorSpec) (ConnectorReport, error)
-	Logger       zerolog.Logger
+	// SetPublicURL writes server.public_url to the daemon's config file,
+	// removing it for "", and applies it (ADR 0021). A refusal is a
+	// *ConfigError. Nil answers PUT /admin/server/public-url with 501.
+	SetPublicURL func(ctx context.Context, publicURL string) error
+	// TestRemote sends MCP requests to publicURL's /mcp with token, as a
+	// cloud agent would, and reports how far they got. Every failure is a
+	// RemoteTestResult with an Outcome, not an error; the caller sets OK. The
+	// daemon implements it, since admin imports no HTTP client package
+	// (design §2). It must neither store nor log token. Nil answers POST
+	// /admin/remote/test with 501.
+	TestRemote func(ctx context.Context, publicURL, token string) RemoteTestResult
+	Logger     zerolog.Logger
 }
 
 // The routes' paths. Client builds its requests from the same constants.
@@ -122,6 +136,8 @@ const (
 	pathTokens     = "/admin/tokens"
 	pathUILogin    = "/admin/ui/login"
 	pathConnectors = "/admin/connectors"
+	pathPublicURL  = "/admin/server/public-url"
+	pathRemoteTest = "/admin/remote/test"
 )
 
 // New returns the handler for every /admin/* route. A path it doesn't know
@@ -144,6 +160,9 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("DELETE "+pathTokens+"/{name}", a.withTokens(a.revokeToken))
 	mux.HandleFunc("POST "+pathUILogin, a.uiLogin)
 	mux.HandleFunc("POST "+pathConnectors, a.addConnector)
+	mux.HandleFunc("GET "+pathPublicURL, a.publicURL)
+	mux.HandleFunc("PUT "+pathPublicURL, a.setPublicURL)
+	mux.HandleFunc("POST "+pathRemoteTest, a.remoteTest)
 
 	return mux
 }

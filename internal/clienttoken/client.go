@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -32,6 +31,12 @@ type Client struct {
 	// Connectors are the connectors a scoped token may use; nil for the
 	// default token, which may use every connector.
 	Connectors []string
+	// Remote is whether a scoped token may reach /mcp through a tunnel (ADR
+	// 0021). It is set when the token is created and never changes. The
+	// default token is never remote, and neither is a token that is not
+	// Scoped, whatever this says: httpd decides with Remote only after
+	// Registry.Lookup, whose hits are all scoped.
+	Remote bool
 }
 
 // Default is the Client of the default client token.
@@ -83,7 +88,7 @@ const tokenInfoKey = "wayfindr.client"
 // req.Extra.TokenInfo. UserID is c's name, for the SDK's own use; the
 // gateway reads the Client back with FromTokenInfo.
 func (c Client) TokenInfo() *auth.TokenInfo {
-	return &auth.TokenInfo{UserID: c.Name, Extra: map[string]any{tokenInfoKey: Client{Name: c.Name, Connectors: slices.Clone(c.Connectors)}}}
+	return &auth.TokenInfo{UserID: c.Name, Extra: map[string]any{tokenInfoKey: clone(c)}}
 }
 
 // FromTokenInfo is the Client that ti carries; false when ti is nil or

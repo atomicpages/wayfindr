@@ -27,9 +27,10 @@ const MaxTokenBody = 64 << 10
 type ClientTokens interface {
 	// Create generates a token called name for connectors, stores its
 	// digest, and starts accepting it. It returns the stored row and the
-	// token's value, which nothing keeps. A name already taken is an error
-	// wrapping store.ErrExists.
-	Create(ctx context.Context, name string, connectors []string) (store.ClientToken, string, error)
+	// token's value, which nothing keeps. remote makes the token one that
+	// may reach /mcp through a tunnel (ADR 0021); it cannot be changed
+	// later. A name already taken is an error wrapping store.ErrExists.
+	Create(ctx context.Context, name string, connectors []string, remote bool) (store.ClientToken, string, error)
 	// List returns every scoped token, ordered by name.
 	List(ctx context.Context) ([]store.ClientToken, error)
 	// Revoke deletes the token called name and stops accepting it. An
@@ -44,6 +45,10 @@ type TokenSpec struct {
 	// Connectors are the configured connectors the token may use; at least
 	// one. A name given twice counts once.
 	Connectors []string `json:"connectors"`
+	// Remote makes the token one that may reach /mcp through a tunnel (ADR
+	// 0021). It is fixed at creation; to change it, revoke the token and
+	// create another. Absent means false.
+	Remote bool `json:"remote,omitempty"`
 }
 
 // TokenCreated is the response to POST /admin/tokens. It is the only
@@ -52,6 +57,8 @@ type TokenCreated struct {
 	Name string `json:"name"`
 	// Connectors are the request's, without repeats, in the order given.
 	Connectors []string `json:"connectors"`
+	// Remote is whether the token may reach /mcp through a tunnel.
+	Remote bool `json:"remote"`
 	// Token is the value a client presents as its bearer. It cannot be
 	// read back: only its SHA-256 is stored.
 	Token     string    `json:"token"`
@@ -67,9 +74,11 @@ type TokenList struct {
 // Token is one scoped client token as GET /admin/tokens lists it, without
 // its value.
 type Token struct {
-	Name       string    `json:"name"`
-	Connectors []string  `json:"connectors"`
-	CreatedAt  time.Time `json:"created_at"`
+	Name       string   `json:"name"`
+	Connectors []string `json:"connectors"`
+	// Remote is whether the token may reach /mcp through a tunnel.
+	Remote    bool      `json:"remote"`
+	CreatedAt time.Time `json:"created_at"`
 	// LastUsedAt is when a client last presented the token, as the daemon
 	// last recorded it (at most a minute late); absent until first use.
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
@@ -119,7 +128,7 @@ func (a api) createToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, value, err := a.Tokens.Create(r.Context(), spec.Name, connectors)
+	row, value, err := a.Tokens.Create(r.Context(), spec.Name, connectors, spec.Remote)
 
 	if errors.Is(err, store.ErrExists) {
 		http.Error(w, fmt.Sprintf("a client token called %q already exists; revoke it first to replace it", spec.Name), http.StatusConflict)
@@ -134,8 +143,8 @@ func (a api) createToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.Logger.Info().Str("client_token", row.Name).Strs("connectors", row.Connectors).Msg("client token created")
-	writeJSON(w, TokenCreated{Name: row.Name, Connectors: row.Connectors, Token: value, CreatedAt: row.CreatedAt.UTC()})
+	a.Logger.Info().Str("client_token", row.Name).Strs("connectors", row.Connectors).Bool("remote", row.Remote).Msg("client token created")
+	writeJSON(w, TokenCreated{Name: row.Name, Connectors: row.Connectors, Remote: row.Remote, Token: value, CreatedAt: row.CreatedAt.UTC()})
 }
 
 // checkTokenSpec checks spec against the naming rule and the running
@@ -195,7 +204,7 @@ func (a api) listTokens(w http.ResponseWriter, r *http.Request) {
 	res := TokenList{Tokens: make([]Token, 0, len(rows))}
 
 	for _, t := range rows {
-		tok := Token{Name: t.Name, Connectors: t.Connectors, CreatedAt: t.CreatedAt.UTC()}
+		tok := Token{Name: t.Name, Connectors: t.Connectors, Remote: t.Remote, CreatedAt: t.CreatedAt.UTC()}
 
 		if t.LastUsedAt != nil {
 			at := t.LastUsedAt.UTC()
@@ -231,12 +240,12 @@ func (a api) revokeToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, TokenRevoked{Name: name})
 }
 
-// CreateToken calls POST /admin/tokens: it creates a scoped client token
-// called name for connectors, and returns it with its value, which the
-// daemon never shows again.
-func (c *Client) CreateToken(ctx context.Context, name string, connectors []string) (TokenCreated, error) {
+// CreateToken calls POST /admin/tokens: it creates the scoped client token
+// spec describes and returns it with its value, which the daemon never shows
+// again.
+func (c *Client) CreateToken(ctx context.Context, spec TokenSpec) (TokenCreated, error) {
 	var res TokenCreated
-	err := c.do(ctx, http.MethodPost, pathTokens, TokenSpec{Name: name, Connectors: connectors}, &res)
+	err := c.do(ctx, http.MethodPost, pathTokens, spec, &res)
 
 	return res, err
 }

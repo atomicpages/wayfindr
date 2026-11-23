@@ -1494,6 +1494,151 @@ code.user-code {
   padding: 4px 12px;
 }
 
+/* ---------- Cloud agents ---------- */
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.steps .n {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--input);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.steps .done .n {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+  color: var(--foreground);
+}
+
+.steps .current {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.steps .current .n {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.options {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 32rem;
+}
+
+.check.option {
+  align-items: flex-start;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.check.option:hover {
+  background: var(--accent);
+}
+
+.check.option:has(input:checked) {
+  border-color: var(--primary);
+}
+
+.check.option:has(input:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.check.option input {
+  margin-top: 2px;
+}
+
+.check.option .opt-text {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.alert.prominent {
+  border-width: 2px;
+}
+
+.alert.prominent b {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Copy buttons need the clipboard, so they show only when console.js finds
+   one. The text next to each one is selectable either way. */
+.copy {
+  display: none;
+}
+
+.can-copy .copy {
+  display: inline-flex;
+}
+
+.copyrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.copyrow input.secret,
+.copyrow code {
+  flex: 1 1 18rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.review.setup code {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.review.setup dd {
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.snippet-wrap {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: start;
+}
+
+.snippet {
+  margin: 0;
+  max-width: 70ch;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--muted);
+  font: 400 13px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
 /* ---------- Toast ---------- */
 .toaster {
   position: fixed;

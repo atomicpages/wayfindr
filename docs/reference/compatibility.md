@@ -38,7 +38,7 @@ version the daemon doesn't know is answered with 2025-11-25.
 | ----------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
 | stdio             | `command` set                              | Wayfindr spawns the command and talks MCP over its stdin and stdout.                                      |
 | Streamable HTTP   | `url` set                                  | The default for `url` connectors.                                                                         |
-| HTTP+SSE (legacy) | `transport = "sse"`, or automatic fallback | Wayfindr falls back to it when the Streamable HTTP `initialize` request gets a 4xx other than 401 or 403. |
+| HTTP+SSE (legacy) | `transport = "sse"`, or automatic fallback | Wayfindr falls back to it when the Streamable HTTP `initialize` request gets a 4xx other than 401 or 403, and no request of the connect got a 401 or 403. |
 
 Upstream auth: OAuth 2.1 / OIDC with discovery (protected-resource metadata,
 authorization-server metadata, and the 2025-03-26 fallback), Dynamic Client
@@ -118,6 +118,24 @@ HTTP.
 Zed sends remote server header values as written, without expanding environment
 variables ([zed#60459](https://github.com/zed-industries/zed/issues/60459)), so
 an HTTP entry would have to contain the token. Use the stdio shim with Zed.
+
+### Cloud agents
+
+A cloud agent runs in a vendor's cloud, so it can't use stdio or reach your
+loopback address. It connects to `/mcp` over HTTPS through a tunnel you run, with
+a [remote client token](../guide/access/scoped-tokens#remote-tokens) as its
+bearer token. The [Cloud agents guide](../guide/cloud-agents) sets it up.
+
+| Cloud agent   | Through a tunnel with a remote token | What it needs                                                                                                   | Checked with |
+| ------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------ |
+| Grok Bot      | Yes                                  | Version 0.79 or later: a custom connector with an `Authorization` header. Use a personal Bot, not a Team Bot.   | not yet      |
+| Muse (Meta)   | Yes                                  | A custom connector made in chat; paste the token into Muse's secure credential prompt.                          | not yet      |
+| ChatGPT (web) | Not yet                              | Its connectors take OAuth or no auth, with no header field, so it needs an OAuth sign-in Wayfindr doesn't have. | n/a          |
+
+Wayfindr serves these agents as clients, the same as any other, and adds nothing
+for them to the tools it exposes. An agent may ask you to confirm each
+`call_tool` call, because Wayfindr can't tell it which upstream tools only read.
+The agent's own settings decide that.
 
 ### Manual checks
 

@@ -82,6 +82,10 @@ type Config struct {
 	Handlers Handlers
 }
 
+// mcpPath is the MCP endpoint, the one route a remote request can reach
+// besides the OAuth callback (ADR 0021).
+const mcpPath = "/mcp"
+
 // NewHandler returns the guarded route table.
 func NewHandler(cfg Config) (http.Handler, error) {
 	if cfg.Token == "" {
@@ -94,11 +98,13 @@ func NewHandler(cfg Config) (http.Handler, error) {
 
 	h := cfg.Handlers
 	// The route table of design §7.7. Every route but the callback also
-	// requires a loopback Host; that check wraps the whole mux below.
+	// requires a loopback Host and no forwarding header; that check wraps
+	// the whole mux below. The one exception is /mcp, which a remote
+	// request reaches with a remote scoped token (ADR 0021).
 	//
 	//	route                  guards (after Host)      who passes
 	//	GET /healthz           origin                   anyone local
-	//	POST|GET|DELETE /mcp   origin, bearer           default or scoped token
+	//	POST|GET|DELETE /mcp   origin, bearer, remote   default or scoped token; remote: a remote token
 	//	GET /auth/{connector}  origin                   anyone local
 	//	POST /auth/{connector} origin, same-origin      the confirmation form
 	//	/admin/                origin, bearer, admin    default token only (scoped: 403)
@@ -109,7 +115,7 @@ func NewHandler(cfg Config) (http.Handler, error) {
 	// /mcp also runs behind the go-sdk bearer middleware (carryClient), which
 	// carries the resolved Client into the request's auth.TokenInfo.
 	loopback := guard{origin: true}
-	bearer := guard{origin: true, bearer: true}
+	mcpGuard := guard{origin: true, bearer: true, remote: true}
 	admin := guard{origin: true, bearer: true, adminOnly: true}
 	mcp := carryClient(orNotImplemented(h.MCP))
 	type route struct {
@@ -119,9 +125,9 @@ func NewHandler(cfg Config) (http.Handler, error) {
 	}
 	routes := []route{
 		{"GET /healthz", loopback, healthz(cfg.Version)},
-		{"POST /mcp", bearer, mcp},
-		{"GET /mcp", bearer, mcp},
-		{"DELETE /mcp", bearer, mcp},
+		{"POST " + mcpPath, mcpGuard, mcp},
+		{"GET " + mcpPath, mcpGuard, mcp},
+		{"DELETE " + mcpPath, mcpGuard, mcp},
 		{"GET /auth/{connector}", loopback, h.AuthConfirm},
 		{"POST /auth/{connector}", guard{origin: true, sameOrigin: true}, h.AuthStart},
 		{"/admin/", admin, h.Admin},

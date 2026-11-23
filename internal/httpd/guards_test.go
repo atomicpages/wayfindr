@@ -211,11 +211,13 @@ func TestForeignHostRejected(t *testing.T) {
 // TestForwardedRequestRejected covers a tunnel or proxy that rewrites Host to
 // the loopback address (ngrok --host-header=rewrite, cloudflared
 // httpHostHeader): it still adds a forwarding header, and such a request is
-// treated as foreign. Only the OAuth callback accepts it (wayfindr-rrvq).
+// treated as foreign. Only the OAuth callback accepts it (wayfindr-rrvq), and
+// /mcp with a remote token (remote_test.go); Via counts too (ADR 0021).
 func TestForwardedRequestRejected(t *testing.T) {
 	h := newStubbedHandler(t)
 	headers := map[string]string{
 		"Forwarded":         "for=203.0.113.7",
+		"Via":               "1.1 squid",
 		"X-Forwarded-For":   "203.0.113.7",
 		"X-Forwarded-Host":  "abc.ngrok.app",
 		"X-Forwarded-Proto": "https",

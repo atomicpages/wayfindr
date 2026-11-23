@@ -81,6 +81,7 @@ func path(parts ...string) string { return toml.Key(parts).String() }
 
 func (v *validator) config(c *Config) {
 	v.server(c.Server)
+	v.publicURL(c.Server.PublicURL)
 	v.storage(c.Storage)
 
 	if c.Embedding != nil {
@@ -150,6 +151,39 @@ func (v *validator) server(s Server) {
 
 	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
 		v.add("server.listen", "host %q must be a loopback address such as 127.0.0.1", host)
+	}
+}
+
+// publicURL checks server.public_url (ADR 0021): empty, or the absolute https
+// address of the tunnel, with at most a "/" path. It is informational, so the
+// rules only keep it printable and usable as an origin: no userinfo, query, or
+// fragment. Messages never quote the value, which may carry a credential.
+func (v *validator) publicURL(s string) {
+	const at = "server.public_url"
+
+	if s == "" {
+		return
+	}
+
+	u, err := url.Parse(s)
+
+	if err != nil {
+		v.notURL(at, err)
+
+		return
+	}
+
+	switch {
+	case u.Scheme != "https" || u.Hostname() == "":
+		v.add(at, "must be an absolute https URL such as https://wayfindr.example.com")
+	case u.User != nil:
+		v.add(at, "must not contain a username or password")
+	case u.RawQuery != "" || u.ForceQuery || strings.Contains(s, "?"):
+		v.add(at, "must not have a query string")
+	case u.Fragment != "" || strings.Contains(s, "#"):
+		v.add(at, "must not have a fragment")
+	case u.Path != "" && u.Path != "/":
+		v.add(at, "must not have a path: the tunnel serves the daemon at its root")
 	}
 }
 
@@ -343,20 +377,27 @@ func (v *validator) template(at string, t Template) bool {
 	return true
 }
 
+// notURL records that the value at at did not parse as a URL. A *url.Error
+// quotes the whole URL, and its query may hold a key (design §9), so only
+// its cause is named. A text redactor would miss a URL whose scheme is what's
+// broken.
+func (v *validator) notURL(at string, err error) {
+	var uerr *url.Error
+
+	if errors.As(err, &uerr) {
+		v.add(at, "is not a URL: %v", uerr.Err)
+
+		return
+	}
+
+	v.add(at, "is not a URL")
+}
+
 func (v *validator) httpURL(at, s string) {
 	u, err := url.Parse(s)
 
 	if err != nil {
-		// A *url.Error quotes the whole URL, and its query may hold a key
-		// (design §9). Its cause names the problem without it. A text
-		// redactor would miss a URL whose scheme is what's broken.
-		var uerr *url.Error
-
-		if errors.As(err, &uerr) {
-			v.add(at, "is not a URL: %v", uerr.Err)
-		} else {
-			v.add(at, "is not a URL")
-		}
+		v.notURL(at, err)
 
 		return
 	}

@@ -265,10 +265,12 @@ redirect_uri = "https://abc.ngrok.app/oauth/callback"
 ```
 
 Keep the `/oauth/callback` path, and register the same URI with the provider.
-The tunnel only needs to be up while you authorize. On a request through a
-tunnel, the daemon serves `/oauth/callback` and nothing else: no MCP, no auth
-pages, no admin API. A callback is accepted only for a sign-in this daemon
-started and is still waiting on. If you change `redirect_uri` on a DCR
+The tunnel only needs to be up while you authorize. Through a tunnel the daemon
+serves this callback, and `/mcp` only for a
+[remote client token](./access/scoped-tokens#remote-tokens) made for a
+[cloud agent](./cloud-agents); see [Loopback only](./security#loopback-only). A
+callback is accepted only for a sign-in this daemon started and is still waiting
+on. If you change `redirect_uri` on a DCR
 connector, Wayfindr registers a new client for the new URI on the next sign-in.
 
 ### Changing a connector's OAuth client

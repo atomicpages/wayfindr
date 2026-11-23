@@ -1,6 +1,7 @@
 // Package webui serves the daemon's local web console under /ui/ (design
-// §7.10, ADR 0016): connectors, the call log, a search preview, and client
-// tokens, as server-rendered pages, and a form that adds connectors
+// §7.10, ADR 0016): connectors, the call log, a search preview, client
+// tokens, and a wizard that connects cloud agents (ADR 0021), as
+// server-rendered pages, and a form that adds connectors
 // (ADR 0017). It reads and acts only through the admin API's Client, so the
 // browser and the CLI see the same answers; the daemon writes the config
 // for an add, and the console never edits or removes a connector.
@@ -46,9 +47,12 @@ type Admin interface {
 	Search(ctx context.Context, req admin.SearchRequest) (admin.SearchResult, error)
 	Tools(ctx context.Context, connector string) (admin.ToolList, error)
 	ListTokens(ctx context.Context) (admin.TokenList, error)
-	CreateToken(ctx context.Context, name string, connectors []string) (admin.TokenCreated, error)
+	CreateToken(ctx context.Context, spec admin.TokenSpec) (admin.TokenCreated, error)
 	RevokeToken(ctx context.Context, name string) (admin.TokenRevoked, error)
 	AddConnector(ctx context.Context, spec admin.ConnectorSpec) (admin.ConnectorAdded, error)
+	PublicURL(ctx context.Context) (admin.PublicURL, error)
+	SetPublicURL(ctx context.Context, publicURL string) (admin.PublicURL, error)
+	TestRemote(ctx context.Context, token string) (admin.RemoteTestResult, error)
 }
 
 // Options is what New needs. The daemon builds it once.
@@ -125,6 +129,15 @@ func New(opts Options) (http.Handler, error) {
 	mux.HandleFunc("GET /ui/tokens", c.authed(c.tokens))
 	mux.HandleFunc("POST /ui/tokens", c.authedForm(c.createToken))
 	mux.HandleFunc("POST /ui/tokens/{name}/revoke", c.authedForm(c.revokeToken))
+	mux.HandleFunc("GET /ui/cloud-agents", c.authed(c.cloudAgents))
+	mux.HandleFunc("POST /ui/cloud-agents/url", c.authedForm(c.savePublicURL))
+	mux.HandleFunc("POST /ui/cloud-agents/token", c.authedForm(c.createCloudToken))
+	mux.HandleFunc("POST /ui/cloud-agents/test", c.authedForm(c.testCloudToken))
+	// The posts render rather than redirect, so their paths can land in a
+	// browser's history; a GET there goes back to the wizard, not a 404.
+	mux.HandleFunc("GET /ui/cloud-agents/url", c.authed(c.backToWizard))
+	mux.HandleFunc("GET /ui/cloud-agents/token", c.authed(c.backToWizard))
+	mux.HandleFunc("GET /ui/cloud-agents/test", c.authed(c.backToWizard))
 	mux.HandleFunc("/ui/", c.notFound)
 
 	return securityHeaders(mux), nil
@@ -133,7 +146,7 @@ func New(opts Options) (http.Handler, error) {
 // parsePages parses each page with the shared layout into its own set, so
 // every page can define "title" and "content".
 func parsePages(brands brandIndex) (map[string]*template.Template, error) {
-	funcs := template.FuncMap{"code": codeSpans, "icon": icon, "logo": brands.logo}
+	funcs := template.FuncMap{"code": codeSpans, "icon": icon, "logo": brands.logo, "revoke": revokeFor}
 	layout, err := template.New("layout").Funcs(funcs).ParseFS(templateFiles, "templates/layout.html")
 
 	if err != nil {
@@ -142,7 +155,7 @@ func parsePages(brands brandIndex) (map[string]*template.Template, error) {
 
 	pages := map[string]*template.Template{}
 
-	for _, name := range []string{"connectors", "connector", "calls", "search", "tokens", "error", "add", "review", "device"} {
+	for _, name := range []string{"connectors", "connector", "calls", "search", "tokens", "cloudagents", "error", "add", "review", "device"} {
 		t, err := template.Must(layout.Clone()).ParseFS(templateFiles, "templates/"+name+".html")
 
 		if err != nil {

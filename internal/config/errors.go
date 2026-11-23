@@ -1,6 +1,8 @@
 package config
 
-import "errors"
+import (
+	"errors"
+)
 
 // Kind is the coarse class of a refused edit of the config file
 // (GLOSSARY: Kind). The set is closed.
@@ -65,19 +67,26 @@ const (
 	// spans lines.
 	CaseMultiline Case = "multiline"
 	// CaseChangesOthers (unsafe): the edit would change settings other than
-	// the one connector.
+	// the one connector, or, for SetPublicURL, other than public_url.
 	CaseChangesOthers Case = "changes_others"
+	// CaseServerNotTable (unsafe): SetPublicURL, and server is not written
+	// as a [server] table the edit can find (a dotted key or an inline
+	// table).
+	CaseServerNotTable Case = "server_not_table"
 )
 
 // Error is a refused edit of the config file; the file is left as it was.
-// AppendConnector, RemoveConnector and EditConnector return it as error.
+// AppendConnector, RemoveConnector, EditConnector and SetPublicURL return it
+// as error.
 type Error struct {
-	Kind      Kind
-	Case      Case
+	Kind Kind
+	Case Case
+	// Connector is the connector the edit is about; empty for SetPublicURL.
 	Connector string
 	// Key is the key of the connector's table the Case is about, as TOML
 	// writes it (auth.scopes), for CaseKeyNotSet, CaseKeyTwice,
-	// CaseDottedKeys and CaseMultiline.
+	// CaseDottedKeys and CaseMultiline. SetPublicURL's CaseMultiline names
+	// server.public_url.
 	Key string
 	// Err is the parse error, for CaseUnparsable.
 	Err error
@@ -85,7 +94,11 @@ type Error struct {
 
 // Error is technical, for logs; [Advise] has the user's wording.
 func (e *Error) Error() string {
-	s := "config edit " + string(e.Case) + ": connector " + e.Connector
+	s := "config edit " + string(e.Case)
+
+	if e.Connector != "" {
+		s += ": connector " + e.Connector
+	}
 
 	if e.Key != "" {
 		s += ": key " + e.Key
@@ -120,52 +133,81 @@ type Advice struct {
 	Action  string
 }
 
+// unsafePrefix leads the CLI's summary of an unsafe edit.
+const unsafePrefix = "could not change it safely: "
+
+// Reason is the clause of [Advise]'s summary that says what is wrong,
+// without the CLI's "could not change it safely: " lead-in, for a presenter
+// that words its own, such as the admin API and the console. It is
+// lowercase and has no final period.
+func Reason(e *Error) string {
+	reason, _, _ := explain(e)
+
+	return reason
+}
+
 // Advise says what e means to the user and how to fix it. Its switch on
 // [Case] is exhaustive (the exhaustive linter enforces it), so a new Case
 // cannot ship without advice.
 func Advise(e *Error) Advice {
-	if e == nil {
-		return Advice{}
+	reason, action, unsafe := explain(e)
+
+	if unsafe {
+		reason = unsafePrefix + reason
 	}
 
-	const (
-		unsafe = "could not change it safely: "
-		byHand = "edit the file by hand"
-	)
+	return Advice{Summary: reason, Action: action}
+}
+
+// explain is the one place that words an [*Error]: the reason, the action
+// that fixes it, and whether the edit is unsafe, which [Advise] marks with
+// its lead-in and [Reason] leaves out. The switch is exhaustive (the
+// exhaustive linter enforces it), so a new Case cannot ship without a
+// reason.
+func explain(e *Error) (reason, action string, unsafe bool) {
+	if e == nil {
+		return "", "", false
+	}
+
+	const byHand = "edit the file by hand"
 
 	switch e.Case {
 	case CaseConnectorExists:
-		return Advice{
-			e.Connector + " already exists",
-			"change it with `wayfindr connector edit " + e.Connector + "`, or remove it with `wayfindr connector remove " + e.Connector + "`",
-		}
+		return e.Connector + " already exists",
+			"change it with `wayfindr connector edit " + e.Connector + "`, or remove it with `wayfindr connector remove " + e.Connector + "`", false
 	case CaseConnectorNotFound:
-		return Advice{"no connector is called " + e.Connector, "`wayfindr status` lists them"}
+		return "no connector is called " + e.Connector, "`wayfindr status` lists them", false
 	case CaseEditNotFound:
-		return Advice{"no connector is called " + e.Connector, "`wayfindr connector add` creates one"}
+		return "no connector is called " + e.Connector, "`wayfindr connector add` creates one", false
 	case CaseKeyNotSet:
-		return Advice{e.Connector + " has no " + e.Key, "leave it out, or check its spelling"}
+		return e.Connector + " has no " + e.Key, "leave it out, or check its spelling", false
 	case CaseNothingToChange:
-		return Advice{"nothing to change", "give the flags to set or --unset"}
+		return "nothing to change", "give the flags to set or --unset", false
 	case CaseKeyTwice:
-		return Advice{e.Key + " is changed twice in one edit", "set or unset each key once"}
+		return e.Key + " is changed twice in one edit", "set or unset each key once", false
 	case CaseUnparsable:
-		return Advice{unsafe + "it does not parse, or would not after the edit", byHand}
+		return "it does not parse, or would not after the edit", byHand, true
 	case CaseInlineConnectors:
-		return Advice{unsafe + "its connectors are an inline table", byHand}
+		return "its connectors are an inline table", byHand, true
 	case CaseNotTables:
-		return Advice{unsafe + "connector " + e.Connector + " is not written as a [connectors." + e.Connector + "] table", byHand}
+		return "connector " + e.Connector + " is not written as a [connectors." + e.Connector + "] table", byHand, true
 	case CaseDefinedElsewhere:
-		return Advice{unsafe + "connector " + e.Connector + " is also defined outside its tables", byHand}
+		return "connector " + e.Connector + " is also defined outside its tables", byHand, true
 	case CaseReadsDifferently:
-		return Advice{unsafe + "connector " + e.Connector + " would read differently than written", byHand}
+		return "connector " + e.Connector + " would read differently than written", byHand, true
 	case CaseDottedKeys:
-		return Advice{unsafe + "connector " + e.Connector + " writes " + e.Key + " with dotted keys", byHand}
+		return "connector " + e.Connector + " writes " + e.Key + " with dotted keys", byHand, true
 	case CaseMultiline:
-		return Advice{unsafe + "the value of " + e.Connector + "'s " + e.Key + " spans lines", byHand}
+		if e.Connector == "" {
+			return "the value of " + e.Key + " spans lines", byHand, true
+		}
+
+		return "the value of " + e.Connector + "'s " + e.Key + " spans lines", byHand, true
 	case CaseChangesOthers:
-		return Advice{unsafe + "the edit would change other settings", byHand}
+		return "the edit would change other settings", byHand, true
+	case CaseServerNotTable:
+		return "server is not written as a [server] table", byHand, true
 	}
 
-	return Advice{}
+	return "", "", false
 }

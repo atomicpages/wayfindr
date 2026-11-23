@@ -31,9 +31,9 @@ func (s *Store) CreateClientToken(ctx context.Context, t store.ClientToken) erro
 		return fmt.Errorf("create client token %s: %w", t.Name, err)
 	}
 
-	res, err := s.db.ExecContext(ctx, `INSERT INTO client_tokens (user_id, name, digest, connectors, created_at)
-		VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
-		t.UserID, t.Name, t.Digest[:], string(connectors), t.CreatedAt.UnixMilli())
+	res, err := s.db.ExecContext(ctx, `INSERT INTO client_tokens (user_id, name, digest, connectors, created_at, remote)
+		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+		t.UserID, t.Name, t.Digest[:], string(connectors), t.CreatedAt.UnixMilli(), t.Remote)
 
 	if err != nil {
 		return fmt.Errorf("create client token %s: %w", t.Name, err)
@@ -54,7 +54,7 @@ func (s *Store) CreateClientToken(ctx context.Context, t store.ClientToken) erro
 
 // ListClientTokens implements store.Store.
 func (s *Store) ListClientTokens(ctx context.Context, userID string) ([]store.ClientToken, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, digest, connectors, created_at, last_used_at
+	rows, err := s.db.QueryContext(ctx, `SELECT name, digest, connectors, created_at, last_used_at, remote
 		FROM client_tokens WHERE user_id = ? ORDER BY name`, userID)
 
 	if err != nil {
@@ -74,7 +74,7 @@ func (s *Store) ListClientTokens(ctx context.Context, userID string) ([]store.Cl
 			lastUsedAt sql.NullInt64
 		)
 
-		if err := rows.Scan(&t.Name, &digest, &connectors, &createdAt, &lastUsedAt); err != nil {
+		if err := rows.Scan(&t.Name, &digest, &connectors, &createdAt, &lastUsedAt, &t.Remote); err != nil {
 			return nil, fmt.Errorf("list client tokens: %w", err)
 		}
 

@@ -51,7 +51,7 @@ func TestAddConnector(t *testing.T) {
 	t.Run("a refusal answers its status and advice", func(t *testing.T) {
 		opts := options(t, st, user, &fakeUpstreams{}, admin.ConfigState{})
 		opts.AddConnector = func(context.Context, admin.ConnectorSpec) (admin.ConnectorReport, error) {
-			return admin.ConnectorReport{}, &admin.AddError{Status: http.StatusConflict, Kind: "conflict", Case: "connector_exists",
+			return admin.ConnectorReport{}, &admin.ConfigError{Kind: admin.ConfigKindConflict, Case: admin.ConfigCaseConnectorExists,
 				Advice: admin.Advice{Summary: `A connector named "linear" is already configured.`}}
 		}
 		c, _ := serve(t, opts)

@@ -70,8 +70,11 @@ matter.
 - **Not a proxy for everything in MCP.** Wayfindr proxies tools, and the
   questions a tool asks you during a call (elicitation). Resources, prompts,
   sampling, and roots are not passed through.
-- **Not a hosted or shared service.** The daemon listens on loopback only and
-  serves one user on one machine. There is no team or multi-user mode yet.
+- **Not a hosted or shared service.** The daemon runs on your machine, listens
+  on loopback only, and serves one user. There is no team or multi-user mode
+  yet. A cloud agent such as Grok Bot or Muse can still use it, but only through
+  a tunnel you run, with a token you made for it, and only to `/mcp`. See
+  [Cloud agents](./cloud-agents).
 - **Not a per-tool prompt in your harness.** Your harness sees only `call_tool`,
   so its "allow this tool" prompts cover every upstream tool at once. Choose
   which tools agents get in Wayfindr instead, with a

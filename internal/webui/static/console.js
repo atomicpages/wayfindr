@@ -106,4 +106,55 @@
     },
     true,
   );
+
+  // Copy buttons: shown (by CSS) only when the page can write to the
+  // clipboard. The text they copy is selectable without any of this.
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    document.documentElement.classList.add("can-copy");
+  }
+
+  function select(el) {
+    if (el.select) {
+      el.select();
+      return;
+    }
+
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest && e.target.closest("[data-copy]");
+
+    if (!btn) {
+      return;
+    }
+
+    const src = document.querySelector(btn.dataset.copy);
+    const label = btn.querySelector("span");
+
+    if (!src || !label) {
+      return;
+    }
+
+    const was = btn.dataset.label || label.textContent;
+    btn.dataset.label = was;
+
+    try {
+      await navigator.clipboard.writeText(("value" in src ? src.value : src.textContent).trim());
+      label.textContent = "Copied";
+    } catch {
+      // The write was refused (permissions, an insecure context): select the
+      // text so the user can copy it by hand.
+      select(src);
+      label.textContent = "Press Ctrl+C";
+    }
+
+    setTimeout(() => {
+      label.textContent = was;
+    }, 2500);
+  });
 })();

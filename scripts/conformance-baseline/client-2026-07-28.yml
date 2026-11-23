@@ -33,11 +33,10 @@ client:
   # SEP-2468: the RFC 9207 iss check treats "<issuer>/" as the issuer and
   # redeems the code; a trailing-slash variant must be refused.
   - auth/iss-normalized:sep-2468-client-no-normalization
-  # The 403 insufficient_scope on server/discover is lost: the transport
-  # falls back to initialize (400 at this version) and then SSE, so the
-  # connector goes unreachable, not needs_auth (step_up), and there is no
-  # second authorization.
-  - auth/scope-step-up:scope-step-up-escalation
+  # Warning: the second authorization asks for the union of the scopes
+  # requested before (mcp:profile, see scope-step-up-initial) and the
+  # challenged one (mcp:write); the check wants the 401 challenge's mcp:basic
+  # in it, which Wayfindr never asked for (wayfindr-311c).
   - auth/scope-step-up:sep-2350-scope-union-on-reauth
   # Warning: an OAuth connector with no credential goes to needs_auth without
   # a request, so Wayfindr never sees the 401 challenge's scope (mcp:basic)

@@ -61,10 +61,16 @@ type Config struct {
 	Profiles map[string]*Scope `toml:"profiles"`
 }
 
-// Server is the [server] table. Changing it requires a daemon restart.
+// Server is the [server] table. Changing listen requires a daemon restart;
+// public_url is applied by a reload.
 type Server struct {
 	// Listen is a loopback host:port.
 	Listen string `toml:"listen"`
+	// PublicURL is the https address a tunnel serves the daemon at, or empty
+	// when there is none (ADR 0021). It is informational: the console uses it
+	// for setup text and to test the connection, and no request is ever
+	// checked against it.
+	PublicURL string `toml:"public_url"`
 }
 
 // Storage is the [storage] table. Changing it requires a daemon restart.

@@ -66,6 +66,7 @@ func TestTokenInfoRoundTrip(t *testing.T) {
 	for _, c := range []clienttoken.Client{
 		clienttoken.Default(),
 		{Name: "nightly", Connectors: []string{"github", "linear"}},
+		{Name: "grok", Connectors: []string{"github"}, Remote: true},
 	} {
 		ti := c.TokenInfo()
 
@@ -85,6 +86,12 @@ func TestTokenInfoRoundTrip(t *testing.T) {
 		if got.Scoped() != (c.Connectors != nil) {
 			t.Errorf("Scoped() = %v for %v", got.Scoped(), c)
 		}
+	}
+}
+
+func TestDefaultIsNeverRemote(t *testing.T) {
+	if clienttoken.Default().Remote {
+		t.Error("Default().Remote = true, want false")
 	}
 }
 

@@ -18,11 +18,14 @@ type answer struct {
 	status      int
 	contentType string
 	body        string
+	// challenge is the WWW-Authenticate header, if any.
+	challenge string
 }
 
 // scriptedUpstream is an MCP endpoint that answers each POST by its
-// JSON-RPC method from script, and every other request with 405. It
-// records the methods it saw, with GET for the SSE probe.
+// JSON-RPC method from script, and every other request by its HTTP method
+// from script, else with 405. It records the methods it saw, with GET for
+// the SSE probe.
 type scriptedUpstream struct {
 	mu   sync.Mutex
 	seen []string
@@ -32,23 +35,30 @@ func startScripted(t *testing.T, script map[string]answer) (*httptest.Server, *s
 	t.Helper()
 	u := &scriptedUpstream{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var a answer
+		var ok bool
+
 		if r.Method != http.MethodPost {
 			u.saw(r.Method)
-			w.WriteHeader(http.StatusMethodNotAllowed)
 
-			return
+			if a, ok = script[r.Method]; !ok {
+				a = answer{status: http.StatusMethodNotAllowed}
+			}
+		} else {
+			var msg struct {
+				Method string `json:"method"`
+			}
+
+			_ = json.NewDecoder(r.Body).Decode(&msg)
+			u.saw(msg.Method)
+
+			if a, ok = script[msg.Method]; !ok {
+				a = answer{status: http.StatusInternalServerError}
+			}
 		}
 
-		var msg struct {
-			Method string `json:"method"`
-		}
-
-		_ = json.NewDecoder(r.Body).Decode(&msg)
-		u.saw(msg.Method)
-		a, ok := script[msg.Method]
-
-		if !ok {
-			a = answer{status: http.StatusInternalServerError}
+		if a.challenge != "" {
+			w.Header().Set("WWW-Authenticate", a.challenge)
 		}
 
 		if a.contentType != "" {
@@ -85,20 +95,20 @@ func TestFailedInitializeBodyReachesReason(t *testing.T) {
 		{
 			// Slack's shape: not JSON-RPC, so the SDK says only "Bad Request".
 			name:       "non-JSON-RPC body",
-			initialize: answer{http.StatusBadRequest, "application/json", `{"ok":false,"error":"invalid_arguments"}`},
+			initialize: answer{status: http.StatusBadRequest, contentType: "application/json", body: `{"ok":false,"error":"invalid_arguments"}`},
 			want:       []string{"upstream answered 400", "invalid_arguments"},
 		},
 		{
 			name:       "plain text body",
-			initialize: answer{http.StatusBadRequest, "text/plain", "unsupported protocol version\n2025-11-25"},
+			initialize: answer{status: http.StatusBadRequest, contentType: "text/plain", body: "unsupported protocol version\n2025-11-25"},
 			want:       []string{"upstream answered 400", "unsupported protocol version 2025-11-25"},
 		},
 		{
 			// The SDK decodes a JSON-RPC error itself: the probe must leave
 			// the whole body for it to read.
 			name: "JSON-RPC error body",
-			initialize: answer{http.StatusBadRequest, "application/json",
-				`{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"bad params from upstream"}}`},
+			initialize: answer{status: http.StatusBadRequest, contentType: "application/json",
+				body: `{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"bad params from upstream"}}`},
 			want: []string{"bad params from upstream", "upstream answered 400"},
 		},
 	}
@@ -106,7 +116,7 @@ func TestFailedInitializeBodyReachesReason(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv, _ := startScripted(t, map[string]answer{
-				"server/discover": {http.StatusBadRequest, "text/plain", "unknown method"},
+				"server/discover": {status: http.StatusBadRequest, contentType: "text/plain", body: "unknown method"},
 				"initialize":      tt.initialize,
 			})
 			m, _ := newManager(t, nil)
@@ -129,7 +139,7 @@ func TestFailedInitializeBodyReachesReason(t *testing.T) {
 
 func TestFailedInitializeBodyIsBounded(t *testing.T) {
 	srv, _ := startScripted(t, map[string]answer{
-		"initialize": {http.StatusBadRequest, "text/plain", strings.Repeat("x", 4096)},
+		"initialize": {status: http.StatusBadRequest, contentType: "text/plain", body: strings.Repeat("x", 4096)},
 	})
 	m, _ := newManager(t, nil)
 
@@ -161,7 +171,7 @@ func TestFallbackFollowsInitializeNotDiscover(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv, u := startScripted(t, map[string]answer{
-				"server/discover": {http.StatusBadRequest, "text/plain", "unknown method"},
+				"server/discover": {status: http.StatusBadRequest, contentType: "text/plain", body: "unknown method"},
 				"initialize":      {status: tt.initialize},
 			})
 			m, _ := newManager(t, nil)

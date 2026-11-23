@@ -9,7 +9,7 @@ internal/cli/                   cobra commands: parse flags, then call admin.Cli
 internal/setup/                 wayfindr init: default config, master key, store + local user, client token; the report with quick-connect commands and importable clients
 internal/clientconfig/          connector import: read other clients' MCP configs (JSONC, TOML), plan their entries as connectors and secrets
 internal/clienttoken/           client tokens: Read (WAYFINDR_CLIENT_TOKEN over <data>/client-token), Generate, Digest; Client (what a token resolves to) and its TokenInfo round trip; Registry of scoped tokens
-internal/config/                types, strict decode, defaults, validation, ${…} templates, Diff; tools lists (ToolPolicy); project scopes, profiles, Narrowing; the file editor (AppendConnector, EditConnector, RemoveConnector); ListenAddress
+internal/config/                types, strict decode, defaults, validation, ${…} templates, Diff; tools lists (ToolPolicy); project scopes, profiles, Narrowing; the file editor (AppendConnector, EditConnector, RemoveConnector, SetPublicURL); ListenAddress
 internal/secrets/               master-key sourcing, Sealer (AES-256-GCM)
 internal/resolve/               config.Resolver: ${env:…} from the environment, ${secret:…} from sealed store rows; PutSecret seals one
 internal/store/                 Store interface, row types, PlanCatalog, migration runner

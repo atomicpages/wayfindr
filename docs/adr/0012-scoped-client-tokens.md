@@ -7,6 +7,9 @@ Amended:
 
 - 2026-11-12 (wayfindr-3e6f): every start of a background daemon leaves a scoped
   `WAYFINDR_CLIENT_TOKEN` out of its environment, `wayfindr start` included.
+- 2026-11-21 (wayfindr-z5q8): a scoped token can be created as remote, which lets a request
+  through a tunnel reach `/mcp`; that can't be changed either
+  ([0021](./0021-remote-client-tokens)).
 
 ## Context
 
@@ -72,7 +75,10 @@ have no force.
   `wayfindr start` does too (amended 2026-11-12, wayfindr-3e6f).
 - A scoped token's connectors can't be edited. To change them, revoke the token
   and create a new one. The value can't be read back, so a changed scope means
-  handing out a new value anyway.
+  handing out a new value anyway. (A scoped token can also be created as
+  remote, so a cloud agent can reach `/mcp` with it through a tunnel. That can't
+  be edited either; amended 2026-11-21, wayfindr-z5q8, see
+  [0021](./0021-remote-client-tokens).)
 - A scoped token does not narrow the OAuth scopes Wayfindr requests from an
   upstream. That is a separate layer: the token decides who may use a
   connector's credential, not what the credential can do.

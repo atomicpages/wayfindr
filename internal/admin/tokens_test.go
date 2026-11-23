@@ -33,13 +33,15 @@ type fakeTokens struct {
 	mu      sync.Mutex
 	tokens  []store.ClientToken
 	creates [][]string
+	remotes []bool
 	err     error
 }
 
-func (f *fakeTokens) Create(_ context.Context, name string, connectors []string) (store.ClientToken, string, error) {
+func (f *fakeTokens) Create(_ context.Context, name string, connectors []string, remote bool) (store.ClientToken, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.creates = append(f.creates, append([]string{name}, connectors...))
+	f.remotes = append(f.remotes, remote)
 
 	if f.err != nil {
 		return store.ClientToken{}, "", f.err
@@ -49,7 +51,7 @@ func (f *fakeTokens) Create(_ context.Context, name string, connectors []string)
 		return store.ClientToken{}, "", fmt.Errorf("create client token %s: %w", name, store.ErrExists)
 	}
 
-	t := store.ClientToken{Name: name, Connectors: connectors, CreatedAt: created}
+	t := store.ClientToken{Name: name, Connectors: connectors, Remote: remote, CreatedAt: created}
 	f.tokens = append(f.tokens, t)
 
 	return t, testTokenValue, nil
@@ -81,6 +83,14 @@ func (f *fakeTokens) Revoke(_ context.Context, name string) error {
 	return nil
 }
 
+// createRemotes is the remote argument of each Create call.
+func (f *fakeTokens) createRemotes() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return slices.Clone(f.remotes)
+}
+
 func (f *fakeTokens) createCalls() [][]string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -103,7 +113,7 @@ func TestCreateTokenAnswersItsValueOnce(t *testing.T) {
 	f := &fakeTokens{}
 	c, _ := serveTokens(t, f)
 
-	got, err := c.CreateToken(t.Context(), "nightly-triage", []string{"github", "linear", "github"})
+	got, err := c.CreateToken(t.Context(), admin.TokenSpec{Name: "nightly-triage", Connectors: []string{"github", "linear", "github"}})
 
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
@@ -129,10 +139,61 @@ func TestCreateTokenWire(t *testing.T) {
 		t.Fatalf("POST /admin/tokens = %d, want 200; body: %s", code, body)
 	}
 
-	want := `{"name":"nightly-triage","connectors":["github","linear"],"token":"` + testTokenValue + `","created_at":"2026-11-08T10:00:00Z"}` + "\n"
+	want := `{"name":"nightly-triage","connectors":["github","linear"],"remote":false,"token":"` + testTokenValue + `","created_at":"2026-11-08T10:00:00Z"}` + "\n"
 
 	if diff := cmp.Diff(want, string(body)); diff != "" {
 		t.Errorf("body (-want +got):\n%s", diff)
+	}
+}
+
+func TestCreateTokenRemoteIsAnswerStoredAndListed(t *testing.T) {
+	f := &fakeTokens{}
+	c, srv := serveTokens(t, f)
+
+	got, err := c.CreateToken(t.Context(), admin.TokenSpec{Name: "grok", Connectors: []string{"github"}, Remote: true})
+
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	want := admin.TokenCreated{Name: "grok", Connectors: []string{"github"}, Remote: true, Token: testTokenValue, CreatedAt: created}
+
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("CreateToken (-want +got):\n%s", diff)
+	}
+
+	if diff := cmp.Diff([]bool{true}, f.createRemotes()); diff != "" {
+		t.Errorf("Create remote (-want +got):\n%s", diff)
+	}
+
+	// The wire body takes "remote", and the list shows it beside a token
+	// that is not remote.
+	code, body := post(t, srv, srv.URL+"/admin/tokens", `{"name":"local","connectors":["linear"]}`)
+
+	if code != http.StatusOK || !strings.Contains(string(body), `"remote":false`) {
+		t.Errorf("POST without remote = %d %s, want 200 answering remote false", code, body)
+	}
+
+	code, body = post(t, srv, srv.URL+"/admin/tokens", `{"name":"muse","connectors":["linear"],"remote":true}`)
+
+	if code != http.StatusOK || !strings.Contains(string(body), `"remote":true`) {
+		t.Errorf("POST with remote = %d %s, want 200 answering remote true", code, body)
+	}
+
+	list, err := c.ListTokens(t.Context())
+
+	if err != nil {
+		t.Fatalf("ListTokens: %v", err)
+	}
+
+	remote := map[string]bool{}
+
+	for _, tok := range list.Tokens {
+		remote[tok.Name] = tok.Remote
+	}
+
+	if diff := cmp.Diff(map[string]bool{"grok": true, "local": false, "muse": true}, remote); diff != "" {
+		t.Errorf("ListTokens remote (-want +got):\n%s", diff)
 	}
 }
 
@@ -175,7 +236,7 @@ func TestCreateTokenRefusals(t *testing.T) {
 func TestCreateTokenStoreFailureNeverEchoesAValue(t *testing.T) {
 	c, _ := serveTokens(t, &fakeTokens{err: errors.New("database is locked")})
 
-	_, err := c.CreateToken(t.Context(), "nightly", []string{"github"})
+	_, err := c.CreateToken(t.Context(), admin.TokenSpec{Name: "nightly", Connectors: []string{"github"}})
 
 	if statusOf(err) != http.StatusInternalServerError || !strings.Contains(err.Error(), "creating the client token failed; see the daemon log") {
 		t.Errorf("CreateToken = %v, want 500 pointing at the daemon log", err)
@@ -187,7 +248,7 @@ func TestListTokensNeverHoldsAValue(t *testing.T) {
 	f := &fakeTokens{}
 	c, srv := serveTokens(t, f)
 
-	if _, err := c.CreateToken(t.Context(), "nightly-triage", []string{"github", "linear"}); err != nil {
+	if _, err := c.CreateToken(t.Context(), admin.TokenSpec{Name: "nightly-triage", Connectors: []string{"github", "linear"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -203,8 +264,8 @@ func TestListTokensNeverHoldsAValue(t *testing.T) {
 
 	// last_used_at is absent for a token never used, and every time is UTC.
 	want := `{"tokens":[` +
-		`{"name":"nightly-triage","connectors":["github","linear"],"created_at":"2026-11-08T10:00:00Z"},` +
-		`{"name":"used","connectors":["slack"],"created_at":"2026-11-08T10:00:00Z","last_used_at":"2026-11-08T20:00:04Z"}` +
+		`{"name":"nightly-triage","connectors":["github","linear"],"remote":false,"created_at":"2026-11-08T10:00:00Z"},` +
+		`{"name":"used","connectors":["slack"],"remote":false,"created_at":"2026-11-08T10:00:00Z","last_used_at":"2026-11-08T20:00:04Z"}` +
 		`]}` + "\n"
 
 	if diff := cmp.Diff(want, string(body)); diff != "" {
@@ -261,7 +322,7 @@ func TestTokensWithoutClientTokensAreNotImplemented(t *testing.T) {
 	st, user := newStore(t)
 	c, _ := serve(t, options(t, st, user, &fakeUpstreams{}, admin.ConfigState{Connectors: []string{"github"}}))
 
-	_, errCreate := c.CreateToken(t.Context(), "nightly", []string{"github"})
+	_, errCreate := c.CreateToken(t.Context(), admin.TokenSpec{Name: "nightly", Connectors: []string{"github"}})
 	_, errList := c.ListTokens(t.Context())
 	_, errRevoke := c.RevokeToken(t.Context(), "nightly")
 

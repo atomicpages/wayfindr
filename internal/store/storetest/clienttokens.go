@@ -58,6 +58,8 @@ func testClientTokensCreateListAndDelete(t *testing.T, newDatabase NewDatabase) 
 	}
 
 	triage := clientToken(user, "nightly-triage", "linear", "github")
+	// Remote is stored as given: set on one token, left false on the other.
+	triage.Remote = true
 	// A sub-millisecond creation time is kept to the millisecond.
 	triage.CreatedAt = triage.CreatedAt.Add(456 * time.Microsecond)
 	ci := clientToken(user, "ci", "github")
@@ -69,7 +71,7 @@ func testClientTokensCreateListAndDelete(t *testing.T, newDatabase NewDatabase) 
 	wantTriage.CreatedAt = time.UnixMilli(1_762_000_000_000)
 	wantCI.LastUsedAt = nil
 
-	// Ordered by name; connectors as given.
+	// Ordered by name; connectors as given; only triage is remote.
 	if diff := cmp.Diff([]store.ClientToken{wantCI, wantTriage}, listClientTokens(t, s, user), cmpopts.EquateApproxTime(0)); diff != "" {
 		t.Fatalf("ListClientTokens (-want +got):\n%s", diff)
 	}

@@ -29,7 +29,7 @@ type fakeTokens struct {
 	tokens []store.ClientToken
 }
 
-func (f *fakeTokens) Create(_ context.Context, name string, connectors []string) (store.ClientToken, string, error) {
+func (f *fakeTokens) Create(_ context.Context, name string, connectors []string, remote bool) (store.ClientToken, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -37,7 +37,7 @@ func (f *fakeTokens) Create(_ context.Context, name string, connectors []string)
 		return store.ClientToken{}, "", fmt.Errorf("create client token %s: %w", name, store.ErrExists)
 	}
 
-	t := store.ClientToken{Name: name, Connectors: connectors, CreatedAt: time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)}
+	t := store.ClientToken{Name: name, Connectors: connectors, Remote: remote, CreatedAt: time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)}
 	f.tokens = append(f.tokens, t)
 
 	return t, scopedValue, nil
@@ -108,6 +108,72 @@ func TestTokenCreatePrintsTheValueOnce(t *testing.T) {
 	}
 }
 
+func TestTokenCreateRemoteIsStoredAndListed(t *testing.T) {
+	f := &fakeTokens{}
+	host := tokenHost(t, f)
+
+	code, stdout, stderr := runToken(t, host, "create", "grok", "--connector", "github", "--remote")
+
+	if code != 0 {
+		t.Fatalf("create --remote: exit code = %d, want 0; stderr: %s", code, stderr)
+	}
+
+	want := "Created remote client token grok. It can use: github.\n" +
+		scopedValue + "\n" +
+		"This is the only time it is shown; store it where the client can read it.\n"
+
+	if diff := cmp.Diff(want, stdout); diff != "" {
+		t.Errorf("create --remote stdout (-want +got):\n%s", diff)
+	}
+
+	if code, _, stderr := runToken(t, host, "create", "local", "--connector", "github"); code != 0 {
+		t.Fatalf("create without --remote: exit code = %d; stderr: %s", code, stderr)
+	}
+
+	f.mu.Lock()
+	got := map[string]bool{}
+
+	for _, tok := range f.tokens {
+		got[tok.Name] = tok.Remote
+	}
+
+	f.mu.Unlock()
+
+	if diff := cmp.Diff(map[string]bool{"grok": true, "local": false}, got); diff != "" {
+		t.Errorf("stored remote (-want +got):\n%s", diff)
+	}
+
+	code, stdout, stderr = runToken(t, host, "list")
+
+	if code != 0 {
+		t.Fatalf("list: exit code = %d; stderr: %s", code, stderr)
+	}
+
+	wantList := "NAME   CONNECTORS  REMOTE  CREATED               LAST USED\n" +
+		"grok   github      yes     2026-11-08T10:00:00Z  -\n" +
+		"local  github      no      2026-11-08T10:00:00Z  -\n"
+
+	if diff := cmp.Diff(wantList, stdout); diff != "" {
+		t.Errorf("list (-want +got):\n%s", diff)
+	}
+
+	code, stdout, stderr = runToken(t, host, "list", "--json")
+
+	if code != 0 {
+		t.Fatalf("list --json: exit code = %d; stderr: %s", code, stderr)
+	}
+
+	var list admin.TokenList
+
+	if err := json.Unmarshal([]byte(stdout), &list); err != nil {
+		t.Fatalf("list --json: %v\n%s", err, stdout)
+	}
+
+	if len(list.Tokens) != 2 || !list.Tokens[0].Remote || list.Tokens[1].Remote {
+		t.Errorf("list --json = %+v, want grok remote and local not", list.Tokens)
+	}
+}
+
 func TestTokenListNeverPrintsAValue(t *testing.T) {
 	f := &fakeTokens{}
 	host := tokenHost(t, f)
@@ -129,9 +195,9 @@ func TestTokenListNeverPrintsAValue(t *testing.T) {
 		t.Fatalf("list: exit code = %d, want 0; stderr: %s", code, stderr)
 	}
 
-	want := "NAME            CONNECTORS      CREATED               LAST USED\n" +
-		"nightly-triage  github, linear  2026-11-08T10:00:00Z  2026-11-08T22:00:04Z\n" +
-		"ci              github, linear  2026-11-08T10:00:00Z  -\n"
+	want := "NAME            CONNECTORS      REMOTE  CREATED               LAST USED\n" +
+		"nightly-triage  github, linear  no      2026-11-08T10:00:00Z  2026-11-08T22:00:04Z\n" +
+		"ci              github, linear  no      2026-11-08T10:00:00Z  -\n"
 
 	if diff := cmp.Diff(want, stdout); diff != "" {
 		t.Errorf("list (-want +got):\n%s", diff)

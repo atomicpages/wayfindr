@@ -82,6 +82,13 @@ type Options struct {
 	// ReportDifficulty is the usage report's proof-of-work. Zero means
 	// telemetry.Difficulty; tests lower it.
 	ReportDifficulty int
+	// RemoteTestClient is the HTTP client the admin API's connection test
+	// sends through (ADR 0021). Nil means the shared outbound client; tests
+	// pass one that trusts their server's certificate.
+	RemoteTestClient *http.Client
+	// RemoteTestTimeout bounds one connection test, both probes together.
+	// Zero means 10 seconds; tests shorten it.
+	RemoteTestTimeout time.Duration
 }
 
 // Daemon is a started daemon: its listener is bound and its store open.
@@ -390,16 +397,31 @@ func New(ctx context.Context, opts Options) (d *Daemon, err error) {
 
 	tokens := &clientTokens{store: st, userID: userID, registry: registry, clock: clock, log: log}
 
+	// The connection test of a cloud agent's path goes out through the
+	// shared outbound client, as a url connector without a [tls] table does.
+	testClient := opts.RemoteTestClient
+
+	if testClient == nil {
+		testClient, err = clients.For(ctx, config.Connector{})
+
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	remoteTester := newRemoteTester(testClient, opts.RemoteTestTimeout, registry, log)
+
 	// The web console's sessions: the CLI asks the admin API for a login,
 	// and the console redeems it (ADR 0016).
 	sessions := webui.NewSessions(clock.Now)
 	// The console's way to add a connector: the daemon writes its own
 	// config file (ADR 0017). Its reload is bound once the daemon exists.
-	adder := &connectorAdder{
+	writer := &configWriter{
 		file:      p.ConfigFile,
 		opts:      loadOpts,
 		putSecret: resolver.PutSecret,
 		resolver:  resolver,
+		config:    cfgState.snapshot,
 		status:    manager.Status,
 		awaitSync: rec.awaitSync,
 		log:       log,
@@ -433,7 +455,9 @@ func New(ctx context.Context, opts Options) (d *Daemon, err error) {
 
 			return admin.UILogin{Path: path, ExpiresAt: expires}
 		},
-		AddConnector: adder.add,
+		AddConnector: writer.add,
+		SetPublicURL: writer.setPublicURL,
+		TestRemote:   remoteTester.test,
 		Logger:       log,
 	})
 	// The console reads through the admin API in process, so it and the
@@ -495,7 +519,7 @@ func New(ctx context.Context, opts Options) (d *Daemon, err error) {
 		clients:   clients,
 		broker:    broker,
 	}
-	adder.reload = built.reloadFile
+	writer.reload = built.reloadFile
 	upstreams.embedding = built.embeddingSecretSet
 
 	return built, nil
@@ -779,6 +803,8 @@ type configState struct {
 	// (`wayfindr secret list`). It is never changed once built, so it is
 	// shared, not copied.
 	secretUsers map[string][]string
+	// publicURL is the running config's server.public_url (ADR 0021).
+	publicURL string
 }
 
 func (s *configState) snapshot() admin.ConfigState {
@@ -790,6 +816,7 @@ func (s *configState) snapshot() admin.ConfigState {
 		Profiles:    maps.Clone(s.profiles),
 		ConfigError: s.err,
 		SecretUsers: s.secretUsers,
+		PublicURL:   s.publicURL,
 	}
 }
 
@@ -802,6 +829,7 @@ func (s *configState) applying(cfg *config.Config) {
 	s.configs = cfg.Connectors
 	s.profiles = cfg.Profiles
 	s.secretUsers = cfg.SecretUsers()
+	s.publicURL = cfg.Server.PublicURL
 	s.err = ""
 }
 

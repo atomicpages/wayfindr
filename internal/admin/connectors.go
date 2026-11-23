@@ -88,19 +88,6 @@ type ConnectorAdded struct {
 	Secrets []string `json:"secrets"`
 }
 
-// AddError is an add the daemon refused, such as a taken or invalid name:
-// the status to answer, the config package's Kind and Case, and the advice,
-// whose text is the response body.
-type AddError struct {
-	Status     int
-	Kind, Case string
-	Advice     Advice
-}
-
-// Error is technical text for logs: the Kind and Case. What the error
-// means to the user is its Advice.
-func (e *AddError) Error() string { return "add connector: " + e.Kind + "/" + e.Case }
-
 // addConnector serves POST /admin/connectors (ADR 0017). It never logs the
 // body, which holds secret values (design §9).
 func (a api) addConnector(w http.ResponseWriter, r *http.Request) {
@@ -126,9 +113,7 @@ func (a api) addConnector(w http.ResponseWriter, r *http.Request) {
 
 	rep, err := a.AddConnector(r.Context(), spec)
 
-	if ae := (*AddError)(nil); errors.As(err, &ae) {
-		http.Error(w, ae.Advice.text(), ae.Status)
-
+	if writeConfigError(w, err) {
 		return
 	}
 

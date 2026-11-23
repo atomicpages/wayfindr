@@ -24,8 +24,8 @@ type guards struct {
 	// ip is Config.IP, unmapped: the bound address, which a Host or Origin
 	// may name as well as the three loopback names.
 	ip netip.Addr
-	// callback is Config.CallbackPath, the only path served on a
-	// non-loopback Host; empty for none.
+	// callback is Config.CallbackPath, the only path served to any remote
+	// request; empty for none.
 	callback string
 	// tokenSum is the SHA-256 of the default client token. Comparing
 	// digests keeps the comparison constant-time in the token's length too.
@@ -36,22 +36,78 @@ type guards struct {
 	log     zerolog.Logger
 }
 
-// host is the outermost guard. It runs before routing, so a foreign Host
-// gets 404 for every path and method (never a 405 or a path-cleaning
-// redirect), and a rebinding page learns nothing about which routes exist.
-// A forwarded request counts as foreign whatever its Host says: a tunnel can
-// rewrite Host to the loopback address, but it adds a forwarding header.
+// host is the outermost guard. It runs before routing, so a remote request
+// it refuses gets 404 for every path and method (never a 405 or a
+// path-cleaning redirect), and a rebinding page or a scanner learns nothing
+// about which routes exist. A request is remote when it carries a forwarding
+// header or a Host that isn't loopback (see isRemote).
+//
+// A local request, and any request for the OAuth callback, goes on to the
+// route's own guards. A remote request goes on only if admitRemote lets it,
+// with the Client it resolved in the context for the route's guards.
 func (gs guards) host(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if (gs.callback == "" || r.URL.Path != gs.callback) && (forwarded(r) || !gs.isLoopbackHostPort(r.Host)) {
-			gs.reject(r, "host")
+		if (gs.callback != "" && r.URL.Path == gs.callback) || !gs.isRemote(r) {
+			next.ServeHTTP(w, r)
+
+			return
+		}
+
+		c, refused := gs.admitRemote(r)
+
+		if refused != "" {
+			gs.reject(r, refused)
 			http.NotFound(w, r)
 
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), remoteKey{}, c)))
 	})
+}
+
+// isRemote reports whether r came through a proxy or tunnel, or names a Host
+// other than a loopback name with the daemon's port. A forwarded request is
+// remote whatever its Host says: a tunnel can rewrite Host to the loopback
+// address, but it adds a forwarding header.
+func (gs guards) isRemote(r *http.Request) bool {
+	return forwarded(r) || !gs.isLoopbackHostPort(r.Host)
+}
+
+// admitRemote is the whole decision on a remote request other than one for
+// the OAuth callback (ADR 0021): it may reach mcpPath, and nothing else,
+// if and only if its bearer resolves, under the same one-header rule as a
+// local request, to a remote scoped token. It returns that Client, or which
+// check refused the request.
+//
+// The bearer is resolved before the path is looked at, on every path, so a
+// refusal does the same work whatever the path and the token: a caller
+// without a remote token can't tell from the answer, or its timing, whether
+// mcpPath exists or how close its token was. host answers every refusal
+// with the same 404.
+func (gs guards) admitRemote(r *http.Request) (clienttoken.Client, string) {
+	c, ok := gs.resolveBearer(r)
+
+	switch {
+	case r.URL.Path != mcpPath:
+		return clienttoken.Client{}, "host"
+	case !ok || !c.Scoped() || !c.Remote:
+		return clienttoken.Client{}, "remote_token"
+	}
+
+	return c, ""
+}
+
+// remoteKey is the request context key under which host puts the Client of a
+// remote request it admitted.
+type remoteKey struct{}
+
+// remoteFrom returns the Client host admitted ctx's remote request with;
+// false for a local request.
+func remoteFrom(ctx context.Context) (clienttoken.Client, bool) {
+	c, ok := ctx.Value(remoteKey{}).(clienttoken.Client)
+
+	return c, ok
 }
 
 // guard is the per-route part of design §7.7's guard column. The loopback
@@ -68,6 +124,11 @@ type guard struct {
 	// adminOnly refuses a valid scoped token with 403; only the default
 	// token passes. It needs bearer, which refuses anything else with 401.
 	adminOnly bool
+	// remote lets in a remote request that host admitted; any other route
+	// answers one 404, as host does, so the route table and host's path
+	// check must agree. It needs bearer, which then takes the Client host
+	// resolved instead of resolving the token again.
+	remote bool
 }
 
 // adminScopeMessage is the 403 body a scoped token gets on /admin/.
@@ -76,6 +137,15 @@ const adminScopeMessage = "This client token cannot use the admin API."
 // wrap returns next behind the checks in g, run in table order.
 func (gs guards) wrap(g guard, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		remote, isRemote := remoteFrom(r.Context())
+
+		if isRemote && !g.remote {
+			gs.reject(r, "remote_route")
+			http.NotFound(w, r)
+
+			return
+		}
+
 		if g.origin {
 			if o, ok := r.Header["Origin"]; ok && (len(o) != 1 || !gs.isLoopbackOrigin(o[0])) {
 				gs.reject(r, "origin")
@@ -95,7 +165,11 @@ func (gs guards) wrap(g guard, next http.Handler) http.Handler {
 		}
 
 		if g.bearer {
-			c, ok := gs.resolveBearer(r)
+			c, ok := remote, isRemote
+
+			if !isRemote {
+				c, ok = gs.resolveBearer(r)
+			}
 
 			if !ok {
 				gs.reject(r, "bearer")
@@ -232,12 +306,15 @@ func (gs guards) reject(r *http.Request, guard string) {
 }
 
 // forwarded reports whether r carries any header a proxy or tunnel adds to
-// say whom it forwards for, even an empty one: the standard Forwarded, the de
-// facto X-Forwarded-* and X-Real-IP, and Cloudflare's. A local client sends
-// none of them.
+// say whom it forwards for, even an empty one: the standard Forwarded and
+// Via, the de facto X-Forwarded-For, -Host, -Proto, and X-Real-IP, and
+// Cloudflare's. A local client sends none of them. Via is on the list though
+// some proxies leave it out and a local debugging proxy may add it: a local
+// request taken for remote fails closed, a remote one taken for local fails
+// open (ADR 0021).
 func forwarded(r *http.Request) bool {
 	for _, h := range [...]string{
-		"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto",
+		"Forwarded", "Via", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto",
 		"X-Real-Ip", "Cf-Connecting-Ip",
 	} {
 		if _, ok := r.Header[h]; ok {

@@ -27,7 +27,8 @@ const (
 // page's own data in Body.
 type view struct {
 	Title string
-	// Nav is the active sidebar item: connectors, calls, search, tokens.
+	// Nav is the active sidebar item: connectors, calls, search, tokens,
+	// cloud-agents.
 	Nav string
 	// Parent, when set, is the breadcrumb above Title.
 	Parent, ParentHref string
@@ -51,7 +52,8 @@ func (c *console) base(r *http.Request, s sess, nav, title string) (view, admin.
 		return view{}, admin.Status{}, err
 	}
 
-	v := view{Title: title, Nav: nav, Version: st.Version, Listen: r.Host, CSRF: s.csrf}
+	v := shell(r, s, nav, title)
+	v.Version = st.Version
 
 	for _, cn := range st.Connectors {
 		if needsUser(cn.State) {
@@ -60,6 +62,24 @@ func (c *console) base(r *http.Request, s sess, nav, title string) (view, admin.
 	}
 
 	return v, st, nil
+}
+
+// shell is a page's frame before the daemon's status is known: what base
+// fills in first, and what a page falls back on when the status can't be read.
+func shell(r *http.Request, s sess, nav, title string) view {
+	return view{Title: title, Nav: nav, Listen: r.Host, CSRF: s.csrf}
+}
+
+// pickedSet is the set of names a form's connector checkboxes sent, which
+// refills the form after a refusal.
+func pickedSet(picked []string) map[string]bool {
+	set := make(map[string]bool, len(picked))
+
+	for _, p := range picked {
+		set[p] = true
+	}
+
+	return set
 }
 
 // fail renders the error page with status and msg.
@@ -592,8 +612,33 @@ type tokensView struct {
 type tokenRow struct {
 	Name       string
 	Connectors []string
+	Remote     bool
 	Created    string
 	LastUsed   string
+}
+
+// revokeForm is what the "revoke" template needs for one token row.
+type revokeForm struct {
+	CSRF, Name string
+	// Return is where the revoke sends the browser back to: "cloud-agents",
+	// or "" for the Client tokens page.
+	Return string
+}
+
+// revokeFor builds the "revoke" template's data.
+func revokeFor(csrf, name, ret string) revokeForm {
+	return revokeForm{CSRF: csrf, Name: name, Return: ret}
+}
+
+// tokenRowFor words t for a table row, relative to now.
+func tokenRowFor(now time.Time, t admin.Token) tokenRow {
+	row := tokenRow{Name: t.Name, Connectors: t.Connectors, Remote: t.Remote, Created: date(now, t.CreatedAt), LastUsed: "Never"}
+
+	if t.LastUsedAt != nil {
+		row.LastUsed = ago(now, *t.LastUsedAt)
+	}
+
+	return row
 }
 
 // tokens serves GET /ui/tokens.
@@ -621,13 +666,7 @@ func (c *console) renderTokens(w http.ResponseWriter, r *http.Request, s sess, b
 	now := c.Now()
 
 	for _, t := range list.Tokens {
-		row := tokenRow{Name: t.Name, Connectors: t.Connectors, Created: date(now, t.CreatedAt), LastUsed: "Never"}
-
-		if t.LastUsedAt != nil {
-			row.LastUsed = ago(now, *t.LastUsedAt)
-		}
-
-		body.Tokens = append(body.Tokens, row)
+		body.Tokens = append(body.Tokens, tokenRowFor(now, t))
 	}
 
 	for _, cn := range st.Connectors {
@@ -644,16 +683,11 @@ func (c *console) renderTokens(w http.ResponseWriter, r *http.Request, s sess, b
 func (c *console) createToken(w http.ResponseWriter, r *http.Request, s sess) {
 	name := strings.TrimSpace(r.PostForm.Get("name"))
 	picked := r.PostForm["connector"]
-	created, err := c.Admin.CreateToken(r.Context(), name, picked)
+	created, err := c.Admin.CreateToken(r.Context(), admin.TokenSpec{Name: name, Connectors: picked})
 
 	if err != nil {
 		status, msg := c.message(r, err)
-		body := tokensView{Error: msg, Name: name, Picked: map[string]bool{}}
-
-		for _, p := range picked {
-			body.Picked[p] = true
-		}
-
+		body := tokensView{Error: msg, Name: name, Picked: pickedSet(picked)}
 		c.renderTokens(w, r, s, body, status)
 
 		return
@@ -672,7 +706,15 @@ func (c *console) revokeToken(w http.ResponseWriter, r *http.Request, s sess) {
 		return
 	}
 
-	http.Redirect(w, r, "/ui/tokens?"+url.Values{"done": {"revoked"}, "name": {name}}.Encode(), http.StatusSeeOther)
+	// The Cloud agents page lists remote tokens and sends its revokes back to
+	// itself; any other value of return is ignored.
+	dest := "/ui/tokens"
+
+	if r.PostForm.Get("return") == "cloud-agents" {
+		dest = cloudPath
+	}
+
+	http.Redirect(w, r, dest+"?"+url.Values{"done": {"revoked"}, "name": {name}}.Encode(), http.StatusSeeOther)
 }
 
 // toast is the confirmation a redirect after an action asked for, from a
@@ -736,6 +778,15 @@ func clock(now, t time.Time) string {
 	}
 
 	return date(now, t) + " " + t.Format("15:04")
+}
+
+// countOf words n of noun: "1 connector", "3 connectors".
+func countOf(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // days words a retention: "30 days", or hours below one day.

@@ -185,6 +185,14 @@ anywhere, so `httpd.Listen` also checks the address it actually bound and
 refuses to serve (`httpd.ErrNotLoopback`) unless it is in `127.0.0.0/8` or
 `::1`.
 
+**Public URL.** `server.public_url` (ADR 0021) is empty or the `https` address a
+tunnel serves: no path but `/`, no query, fragment, or userinfo
+(`validator.publicURL`; its messages never quote the value). It is
+informational, so `config.Diff` ignores it and it needs no restart: the daemon's
+`configState` takes it from each applied config, and `GET
+/admin/server/public-url` reads it there. No guard compares a request with it.
+`config.ListenAddress` reads `listen` alone and never validates it.
+
 `config.Diff(old, new)` produces per-connector `Added`, `Removed`, `URLChanged`,
 `Changed`, and `Unchanged` sets, plus `EmbeddingChanged`. It also lists
 `RestartRequired` fields (`server.*`, `storage.*`). A connector whose tools list
@@ -200,7 +208,11 @@ byte, re-parses the result, and refuses (`*config.Error`, Kinds `conflict`,
 `unsafe`, `invalid`) any edit that would read differently than written or change
 another connector; the CLI writes the result with `newfile.Replace`. The daemon
 is the third writer: `POST /admin/connectors` appends a table the same way, for
-the web console (ADR 0017, [§7.8](7.8-daemon.md)). Every writer passes the bytes
+the web console (ADR 0017, [§7.8](7.8-daemon.md)), and `PUT
+/admin/server/public-url` sets or clears `server.public_url` with
+`config.SetPublicURL`, which rewrites that one line (or adds a `[server]` table)
+under the same checks and refuses a `server` written as a dotted key or inline
+table (`CaseServerNotTable`). Both daemon writes share one lock. Every writer passes the bytes
 it read as `newfile.Replace`'s `expect`, so a write that would lose another's
 edit fails with `newfile.ErrChanged` instead; the check and the rename are two
 steps, so two writes in the same instant can still lose one.

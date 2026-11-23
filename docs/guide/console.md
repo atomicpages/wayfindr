@@ -32,13 +32,14 @@ sign in again.
 | A connector   | Every tool its upstream serves now, its class, and whether its tools list exposes it.               | Open a tool to read its definition as the upstream sends it. Sign in again, or sign out. |
 | Calls         | The call log, newest first, filtered by connector or by calls that did not end OK.                  | Open a call that failed to read its error.                                               |
 | Search        | What `search_tools` returns to a client for a query, with each tool's word and meaning ranks.       |                                                                                          |
-| Client tokens | Your scoped client tokens, their connectors, and when each was last used.                           | Create a token (shown once), revoke one.                                                 |
+| Client tokens | Your scoped client tokens, their connectors, which are remote, and when each was last used.         | Create a token (shown once), revoke one.                                                 |
+| Cloud agents  | The remote tokens you made for cloud agents, their connectors, and when each was last used.         | Connect Grok Bot or Muse step by step, test the connection, revoke a token.              |
 
 A connector whose name matches a brand (`gmail`, `github-work`) shows that
 brand's logo, which your browser loads from [theSVG](https://thesvg.org) on
 `cdn.jsdelivr.net`; other connectors, and every connector while you are offline,
 show their first letter. See
-[ADR 0019](/adr/0019-connector-logos-from-thesvg) for why.
+[ADR 0019](../adr/0019-connector-logos-from-thesvg) for why.
 
 The connectors page refreshes every 10 seconds. After you select **Sign in**,
 finish the sign-in in the tab that opens; the connector's row turns `Ready` on
@@ -80,6 +81,24 @@ If the file changed while the connector was being added, for example because you
 saved it in an editor, nothing is written and the form says so. Add the
 connector again.
 
+## Connecting a cloud agent
+
+The **Cloud agents** page walks you through connecting an agent that runs in the
+cloud, such as Grok Bot or Muse (ChatGPT isn't supported yet). You pick the
+agent and the connectors it may use, save the public `https` address your tunnel
+(ngrok, Cloudflare Tunnel, or Tailscale Funnel) gives you, and create a remote
+token, which is shown once. **Test connection** then checks the whole path from
+the internet to the daemon, and the page ends with text to copy into the agent.
+Keep the page open until the agent is set up: Wayfindr keeps only a hash of the
+token, so leaving the page loses it. Revoke a token from the same page's list. The
+[Cloud agents guide](./cloud-agents) covers the tunnel and each agent in full.
+
+For Grok Bot, use a personal Bot, not a Team Bot: everyone on a team uses a Team
+Bot's token. For Muse, paste the token only into Muse's secure credential
+prompt, never into the chat. See
+[Remote tokens](./access/scoped-tokens#remote-tokens) for what one can do, and
+[ADR 0021](../adr/0021-remote-client-tokens) for why remote tokens exist.
+
 ## What it doesn't do
 
 The console never edits or removes a connector, and doesn't import connectors
@@ -95,7 +114,8 @@ its row shows the daemon's advice, such as the
 
 The console is served only on the daemon's loopback address, behind the same
 [Host and Origin checks](/reference/http#host-and-origin-checks) as every other
-route. Your client token never reaches the browser: `wayfindr ui` trades it for
+route. A request through a tunnel never reaches it, whatever token it carries
+(see [Loopback only](./security#loopback-only)). Your client token never reaches the browser: `wayfindr ui` trades it for
 a one-time code, and the browser trades the code for a session cookie that only
 the console's pages can use. Every form also carries a token tied to your
 session. See [`/ui/`](/reference/http#ui) for the details.

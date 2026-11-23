@@ -53,6 +53,29 @@ func TestRegistryLookup(t *testing.T) {
 	}
 }
 
+func TestRegistryLookupCarriesRemote(t *testing.T) {
+	local, remote := clienttoken.Digest("wf_s_local"), clienttoken.Digest("wf_s_remote")
+	r := clienttoken.NewRegistry(map[[sha256.Size]byte]clienttoken.Client{
+		local:  {Name: "local", Connectors: []string{"github"}},
+		remote: {Name: "remote", Connectors: []string{"github"}, Remote: true},
+	}, nil)
+
+	added := clienttoken.Digest("wf_s_added")
+	r.Add(added, clienttoken.Client{Name: "added", Connectors: []string{"linear"}, Remote: true})
+
+	for _, tt := range []struct {
+		name   string
+		digest [sha256.Size]byte
+		want   bool
+	}{{"local", local, false}, {"remote", remote, true}, {"added", added, true}} {
+		got, ok := r.Lookup(tt.digest)
+
+		if !ok || got.Remote != tt.want {
+			t.Errorf("Lookup(%s) = %+v, %v; want Remote %v", tt.name, got, ok, tt.want)
+		}
+	}
+}
+
 func TestRegistryLookupReturnsCopy(t *testing.T) {
 	d := clienttoken.Digest("wf_s_nightly")
 	c := nightly()

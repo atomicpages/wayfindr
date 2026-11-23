@@ -24,6 +24,8 @@ Status: Accepted (2026-11-03). Amended:
   ([0018](./0018-grants-client-authentication-sender-constraints)).
 - 2026-11-17 (wayfindr-5vps): `dpop_jkt` joins the authorize parameters Wayfindr
   sets itself ([0018](./0018-grants-client-authentication-sender-constraints)).
+- 2026-11-21 (wayfindr-z5q8): a request on a non-loopback `Host` also reaches `/mcp` when it
+  carries a remote client token ([0021](./0021-remote-client-tokens)).
 
 ## Context
 
@@ -137,8 +139,10 @@ wayfindr-afb1).
 `redirect_uri`, e.g. an ngrok URL for providers that reject loopback addresses.
 The URI in effect is also the one used for DCR. On any request whose `Host` is
 not loopback, the daemon serves only `/oauth/callback`; `/mcp` and `/auth/*`
-refuse it. The callback must match a pending, unexpired `state` issued by this
-daemon.
+refuse it. (`/mcp` serves such a request when it carries a remote client token,
+and refuses it with 404 otherwise; amended 2026-11-21, wayfindr-z5q8, see
+[0021](./0021-remote-client-tokens).) The callback must match a pending,
+unexpired `state` issued by this daemon.
 
 ## Consequences
 

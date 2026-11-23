@@ -6,21 +6,22 @@ where the edges are.
 
 ## What it defends against
 
-| Threat                                                       | Defense                                                                                                                                                                           |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Another machine on your network calls the daemon             | It binds to loopback only, and checks the address it actually bound.                                                                                                              |
-| A web page in your browser calls `127.0.0.1:7777`            | Host and Origin checks, and the client token, which a page can't read.                                                                                                            |
+| Threat                                                                 | Defense                                                                                                                                                                                                                                                                    |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Another machine on your network calls the daemon                       | It binds to loopback only, and checks the address it actually bound.                                                                                                                                                                                                       |
+| A web page in your browser calls `127.0.0.1:7777`                      | Host and Origin checks, and the client token, which a page can't read.                                                                                                                                                                                                     |
 | Another user on the machine takes the port while the daemon is stopped | The CLI and the stdio shim send the client token only to a daemon that holds the lock in your data directory, which other users can't open. A client you set up over HTTP, with the token in its environment, does no such check: on a shared machine, use the stdio shim. |
-| DNS rebinding                                                | A request whose `Host` isn't a loopback name or IP on the daemon's port gets 404 on every path.                                                                                   |
-| A tunnel for the OAuth callback exposes the daemon           | Forwarded requests reach only `/oauth/callback`, whatever `Host` they carry.                                                                                                      |
-| Someone copies your database file                            | Secrets and tokens in it are encrypted, and the master key is normally stored elsewhere.                                                                                          |
-| An agent or a prompt injection tries to read credentials     | No tool returns them. Agents only get tool definitions, results, and advice.                                                                                                      |
-| A prompt injection takes over an unattended agent            | Give it a scoped client token: it reaches only its connectors, and no admin API.                                                                                                  |
-| A token leaks to the wrong server                            | Each OAuth token is bound to its connector's URL and only sent there.                                                                                                             |
-| A stolen OAuth token is replayed elsewhere                   | With DPoP or a certificate-bound token, it is useless without Wayfindr's key or certificate.                                                                                      |
-| A hostile server shows you a phishing page for a device code | Wayfindr shows or opens only an `https` address, or `http` on loopback.                                                                                                           |
-| An upstream's tool schema makes Wayfindr fetch something     | Schemas are validated with remote and file `$ref` loading turned off.                                                                                                             |
-| Secrets end up in logs or bug reports                        | Wayfindr redacts header values, tokens, auth codes, secret values, and URL query strings and user info before it logs them. A `${…}` in a connector's URL shows as the reference. |
+| DNS rebinding                                                          | A request whose `Host` isn't a loopback name or IP on the daemon's port gets 404 on every path, except what a tunnel may reach ([Loopback only](#loopback-only)).                                                                                                          |
+| A tunnel for the OAuth callback exposes the daemon                     | A tunnel reaches only the callback and, with a remote client token, `/mcp`. See [Loopback only](#loopback-only).                                                                                                                                                           |
+| A cloud agent's remote client token leaks                              | It reaches only its connectors, never the admin API, the console, or auth links. Revoke it, and the next request with it gets `404`.                                                                                                                                       |
+| Someone copies your database file                                      | Secrets and tokens in it are encrypted, and the master key is normally stored elsewhere.                                                                                                                                                                                   |
+| An agent or a prompt injection tries to read credentials               | No tool returns them. Agents only get tool definitions, results, and advice.                                                                                                                                                                                               |
+| A prompt injection takes over an unattended agent                      | Give it a scoped client token: it reaches only its connectors, and no admin API.                                                                                                                                                                                           |
+| A token leaks to the wrong server                                      | Each OAuth token is bound to its connector's URL and only sent there.                                                                                                                                                                                                      |
+| A stolen OAuth token is replayed elsewhere                             | With DPoP or a certificate-bound token, it is useless without Wayfindr's key or certificate.                                                                                                                                                                               |
+| A hostile server shows you a phishing page for a device code           | Wayfindr shows or opens only an `https` address, or `http` on loopback.                                                                                                                                                                                                    |
+| An upstream's tool schema makes Wayfindr fetch something               | Schemas are validated with remote and file `$ref` loading turned off.                                                                                                                                                                                                      |
+| Secrets end up in logs or bug reports                                  | Wayfindr redacts header values, tokens, auth codes, secret values, and URL query strings and user info before it logs them. A `${…}` in a connector's URL shows as the reference.                                                                                          |
 
 What it does not defend against: other processes running as your user. Any
 program that can read your home directory can read the default client token and
@@ -40,12 +41,34 @@ Wayfindr never resolves names to check them. Because a hosts file can map
 `localhost` anywhere, the daemon also checks the address it actually bound, and
 refuses to serve with `listen address is not loopback` if it isn't.
 
-There is no setting to listen on another interface, and the daemon serves only
-local clients. A request that comes through a proxy or tunnel gets `404` on
-every path but `/oauth/callback`, even when the proxy rewrites `Host` to
-`127.0.0.1`: the daemon refuses any request with a `Forwarded`,
+There is no setting to listen on another interface. Wayfindr treats a request as
+coming through a tunnel or proxy (a _remote_ request) when its `Host` isn't a
+loopback name with the daemon's port, or when it carries a `Forwarded`, `Via`,
 `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Real-IP`, or
-`CF-Connecting-IP` header.
+`CF-Connecting-IP` header. A proxy that rewrites `Host` to `127.0.0.1` doesn't
+change that: the forwarding header still marks the request.
+
+**What answers through a tunnel.** Exactly two things:
+
+- `/oauth/callback`, with no token, for a sign-in you started in the last 10
+  minutes. See [The OAuth callback](#the-oauth-callback).
+- `/mcp`, only with a scoped client token you created as
+  [remote](./access/scoped-tokens#remote-tokens), for a
+  [cloud agent](./cloud-agents), and then only that token's connectors.
+
+Everything else gets `404 page not found`, whatever token it carries: the admin
+API, the console, auth links, and `/healthz`. So does `/mcp` with no token, a
+wrong or revoked token, or any token that isn't remote, the default client token
+included. It is never `401`, so a request from the internet can't learn which
+tokens exist.
+
+A tunnel must add one of the headers above, or its requests look local and the
+default client token would work through it; ngrok, Cloudflare Tunnel, and
+Tailscale Funnel add them. The [Cloud agents guide](./cloud-agents) sets up a
+tunnel and a remote token step by step, and says which header each proxy needs.
+Through a tunnel the token is the only defense, so give it only the connectors
+its agent needs, keep it out of chats and logs, and revoke it when you stop using
+the agent. See [ADR 0021](../adr/0021-remote-client-tokens).
 
 ## Client tokens
 
@@ -64,11 +87,12 @@ replace it, see
 
 Every route also needs a `Host` that names a loopback name (`127.0.0.1`,
 `localhost`, `[::1]`, or the address the daemon bound) with the port the daemon
-listens on, except `/oauth/callback`.
+listens on, except what a tunnel may reach (see
+[Loopback only](#loopback-only)).
 
 | Path                         | Needs                                                                                           |
 | ---------------------------- | ----------------------------------------------------------------------------------------------- |
-| `/mcp`                       | A client token, loopback `Host`, no foreign `Origin`.                                           |
+| `/mcp`                       | A client token, loopback `Host`, no foreign `Origin`. Through a tunnel: a remote client token.  |
 | `/admin/…` (used by the CLI) | The default client token, loopback `Host`, no foreign `Origin`.                                 |
 | `GET /healthz`               | Loopback `Host`, no foreign `Origin`. Returns the version only.                                 |
 | `GET /auth/<connector>`      | Loopback `Host`, no foreign `Origin`. Shows a Continue page; starts nothing.                    |
@@ -79,7 +103,8 @@ listens on, except `/oauth/callback`.
 
 A request with the wrong token gets `401`. A scoped client token on `/admin/…`
 gets `403`. A request with a foreign `Origin` gets `403`. A foreign `Host` gets
-`404`, so a rebinding page can't even learn which paths exist.
+`404` (except what a tunnel may reach, see [Loopback only](#loopback-only)), so a
+rebinding page can't even learn which paths exist.
 
 The stdio shim reads the token itself, so clients that use `wayfindr stdio`
 never see it.
@@ -89,7 +114,9 @@ never see it.
 Give every agent that runs unattended a
 [scoped client token](./access/scoped-tokens): it holds the agent to the
 connectors you name and keeps it off the admin API, so a prompt injection can't
-reach your other connectors. A [tools list](./access/tools-lists) hides a
+reach your other connectors. A cloud agent gets a
+[remote token](./access/scoped-tokens#remote-tokens), which is a scoped token
+that may also come in through a tunnel. A [tools list](./access/tools-lists) hides a
 connector's tools from every client, but trusts the upstream's read-only and
 destructive hints, so name the tools you allow for anything that matters.
 Profiles and project scopes are chosen by the client, so they keep a cooperative
@@ -98,13 +125,12 @@ which layer holds against what.
 
 ## The OAuth callback
 
-`/oauth/callback` is the one path served for any `Host`. That lets you route an
-OAuth `redirect_uri` through a tunnel when a provider won't redirect to
+`/oauth/callback` is served for any `Host` without a token. That lets you route
+an OAuth `redirect_uri` through a tunnel when a provider won't redirect to
 `127.0.0.1`. The callback only completes an auth flow you started in the last 10
 minutes: it needs that flow's `state`, and the issuer is checked (RFC 9207)
-before the code is exchanged. Everything else still requires a loopback `Host`
-and no forwarding headers, so the tunnel can't reach `/mcp` or the admin API,
-even if it rewrites `Host`. See
+before the code is exchanged. The rest of a tunnel's reach is in
+[Loopback only](#loopback-only). See
 [A redirect URI through a tunnel](./authentication#a-redirect-uri-through-a-tunnel).
 
 ## Encryption at rest

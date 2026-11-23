@@ -57,15 +57,21 @@ func loadClientTokens(ctx context.Context, st store.Store, userID string, now fu
 	clients := make(map[[sha256.Size]byte]clienttoken.Client, len(rows))
 
 	for _, t := range rows {
-		clients[t.Digest] = clienttoken.Client{Name: t.Name, Connectors: t.Connectors}
+		clients[t.Digest] = registryClient(t)
 	}
 
 	return clienttoken.NewRegistry(clients, now), nil
 }
 
+// registryClient is what the registry keeps of a stored token: everything
+// httpd needs to resolve its bearer, and nothing of its digest or timestamps.
+func registryClient(t store.ClientToken) clienttoken.Client {
+	return clienttoken.Client{Name: t.Name, Connectors: t.Connectors, Remote: t.Remote}
+}
+
 // Create implements admin.ClientTokens: it generates the value, stores its
 // digest, and only then adds it to the registry.
-func (t *clientTokens) Create(ctx context.Context, name string, connectors []string) (store.ClientToken, string, error) {
+func (t *clientTokens) Create(ctx context.Context, name string, connectors []string, remote bool) (store.ClientToken, string, error) {
 	value, err := clienttoken.Generate()
 
 	if err != nil {
@@ -77,6 +83,7 @@ func (t *clientTokens) Create(ctx context.Context, name string, connectors []str
 		Name:       name,
 		Digest:     clienttoken.Digest(value),
 		Connectors: slices.Clone(connectors),
+		Remote:     remote,
 		// The store keeps milliseconds: truncating here makes the create's
 		// answer the time a list reads back.
 		CreatedAt: t.clock.Now().UTC().Truncate(time.Millisecond),
@@ -89,7 +96,7 @@ func (t *clientTokens) Create(ctx context.Context, name string, connectors []str
 		return store.ClientToken{}, "", err
 	}
 
-	t.registry.Add(row.Digest, clienttoken.Client{Name: row.Name, Connectors: row.Connectors})
+	t.registry.Add(row.Digest, registryClient(row))
 
 	return row, value, nil
 }

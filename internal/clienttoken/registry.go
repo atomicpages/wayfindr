@@ -134,5 +134,5 @@ func (r *Registry) add(d [sha256.Size]byte, c Client) {
 }
 
 func clone(c Client) Client {
-	return Client{Name: c.Name, Connectors: slices.Clone(c.Connectors)}
+	return Client{Name: c.Name, Connectors: slices.Clone(c.Connectors), Remote: c.Remote}
 }

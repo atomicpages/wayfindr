@@ -69,7 +69,8 @@ as "design §9".
   the admin API. It adds connectors (ADR 0017) and never edits or removes one. A
   sign-in redirect goes to an http(s) authorize URL only.
 - Writing the config: the user, the CLI, and the daemon
-  (`POST /admin/connectors`, default token only) write `wayfindr.toml`, each
+  (`POST /admin/connectors` and `PUT /admin/server/public-url`, default token
+  only) write `wayfindr.toml`, each
   with `newfile.Replace` against the bytes it read. A command connector runs a
   program, so the console never adds one from a single form post: it shows the
   exact argv and environment and waits for a confirm carrying a single-use,
@@ -77,6 +78,14 @@ as "design §9".
   lives only in the daemon's memory and never reaches a page; a refused form is
   shown again without its secret values. Secret values in the add body are
   stored sealed and never written to the file or logged.
+- Testing a cloud agent's path (`POST /admin/remote/test`, default token only,
+  ADR 0021): the body holds a remote token's value, which `daemon`'s
+  `remoteTester` sends as a bearer to `server.public_url`'s `/mcp` and nowhere
+  else. It is never stored or logged, and neither are the URL's query, a
+  redirect's `Location`, or any answer's body. The test follows no redirect,
+  reads at most 1 MiB of an answer, and ends after 10 seconds. A second probe
+  without a token detects a proxy that makes internet traffic look local
+  (`proxy_treats_remote_as_local`).
 - Log redaction: header values, tokens, codes, secret values, and URL query
   strings are never logged. The values of a connector's `${…}` references (url,
   headers, args, env) are masked as the reference wherever they sit, a url's

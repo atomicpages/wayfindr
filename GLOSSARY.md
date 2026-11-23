@@ -22,6 +22,18 @@ wrong, fix it here first.
   Not to be confused with what a client token resolves to on a request
   (`clienttoken.Client`: the token's name and the connectors it allows),
   which the call log records as the token name.
+- **Cloud agent** — an always-on agent that runs in a vendor's cloud, not on the
+  user's machine: Grok Bot and Muse (Meta) work; ChatGPT can't sign in with a
+  bearer token yet. It is a client of
+  Wayfindr, over HTTPS through a tunnel the user runs, with a remote client
+  token (ADR 0021). Wayfindr has no adapter for it and never calls it. Say
+  _cloud agent_, not _bot_ (Grok's word for one product) or _remote client_.
+- **Public URL** — `server.public_url`: the `https` address the user's tunnel
+  serves the daemon at. It is informational: no request is checked against
+  it. The console uses it for a cloud agent's setup text and to test the
+  connection (ADR 0021). Not the `redirect_uri` of a connector, and not a
+  listen address. Don't call it the _tunnel URL_, _external URL_, or _base
+  URL_. The tunnel itself is the user's, never Wayfindr's.
 - **Shim** — `wayfindr stdio`: a thin stdio↔HTTP forwarder for clients that only
   speak stdio. It holds no state and starts the daemon if it is not running.
   On every request it sends the project scope it finds (`Wayfindr-Scope`)
@@ -207,6 +219,29 @@ wayfindr stdio`), else the entry to add to the harness's config file. All
   if not configured, checked before the profile, project scope, and tools
   list, and the admin API refuses it with 403. Its connectors can't be
   edited: revoke it and create another (ADR 0012).
+- **Remote client token** — a scoped client token created with `--remote` (or
+  in the console's Cloud agents page), for a cloud agent. Only it lets a
+  remote request reach `/mcp`. In every other way it is a scoped token: it
+  reaches only its connectors, the admin API refuses it, and it works from
+  the local machine too. `remote` is stored with the token's digest, is
+  fixed at creation, and can't be set on the default client token; to
+  change it, revoke the token and create another (ADR 0021). Shown as
+  `REMOTE` by `wayfindr token list`. Don't call it a _tunnel token_ or
+  _public token_.
+- **Remote request** — a request that carries a forwarding header (`Forwarded`,
+  `Via`, `X-Forwarded-*`, `X-Real-IP`, `CF-Connecting-IP`), or whose `Host`
+  isn't a loopback name with the daemon's port. The host guard decides
+  alone (`httpd`). On `/mcp` it proceeds only with a remote client token;
+  any other token, or none, gets `404 page not found`, never `401`. Every
+  other route but the callback path refuses it with 404, whatever token it
+  carries. A tunnel that adds no forwarding header and keeps a loopback
+  `Host` isn't seen as remote (wayfindr-gz1y). The opposite of a _local
+  request_ (ADR 0021).
+- **Connection test** — what the console's Cloud agents page runs after it
+  creates a remote token: `POST /admin/remote/test` sends MCP requests to the
+  public URL with the token, and again with none, the way a cloud agent
+  would. Its outcome (`ok`, `not_found`, `proxy_treats_remote_as_local`, …)
+  is a closed set in `admin`; match on it, never on the message.
 - **Discovery chain** — the ordered metadata lookups (protected-resource
   metadata, then authorization-server metadata, then legacy fallback) used to
   find an upstream's OAuth endpoints. See ADR 0007.
@@ -283,7 +318,9 @@ wayfindr stdio`), else the entry to add to the harness's config file. All
   with the flow. Not the OAuth `state`.
 - **Callback path** — `/oauth/callback` (`auth.CallbackPath`), where the
   authorization server sends the browser back. The only path served on a
-  non-loopback `Host`, for a `redirect_uri` through a tunnel (ADR 0007).
+  non-loopback `Host` with no token, for a `redirect_uri` through a tunnel
+  (ADR 0007); `/mcp` is served there only for a remote client token (ADR
+  0021).
 - **Flow phases** — how far a pending flow has got. _Starting_: in the flow
   table from the first moment, so a revoke or a reload can end it, but no
   callback can find it yet. _Armed_: it has its authorize URL and `state`,

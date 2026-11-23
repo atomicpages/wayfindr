@@ -75,6 +75,7 @@ CREATE TABLE client_tokens (            -- scoped client tokens (ADR 0012)
   connectors   TEXT NOT NULL,             -- JSON array of connector names, at least one
   created_at   INTEGER NOT NULL,
   last_used_at INTEGER,                   -- NULL until first use
+  remote       INTEGER NOT NULL DEFAULT 0, -- 1: may reach /mcp through a tunnel (ADR 0021); fixed at creation
   PRIMARY KEY (user_id, name)
 );
 
@@ -121,6 +122,9 @@ CREATE INDEX calls_user_started ON calls (user_id, started_at DESC, id DESC);
   one user. Postgres stores `connectors` as `text[]` and checks
   `octet_length(digest) = 32` and `cardinality(connectors) > 0`. The migrations
   are SQLite `0004_client_tokens.sql` and Postgres `0008_client_tokens.sql`.
+  `remote` (ADR 0021; `boolean` in Postgres) is set at creation and never
+  updated; SQLite `0007_client_token_remote.sql` and Postgres
+  `0011_client_token_remote.sql` add it, false for earlier tokens.
   `CreateClientToken` refuses a duplicate name or digest with `ErrExists`;
   `TouchClientTokens` is keyed by digest, never moves `last_used_at` backwards,
   and ignores digests revoked since they were used, so a token created again
@@ -166,6 +170,8 @@ CREATE INDEX calls_user_started ON calls (user_id, started_at DESC, id DESC);
   | `0003_hidden_tools`                   | `0007_hidden_tools`                           |
   | `0004_client_tokens` (+ `token_name`) | `0008_client_tokens` (+ `token_name`)         |
   | `0005_credential_client_id`           | `0009_credential_client_id`                   |
+  | `0006_call_error_text`                | `0010_call_error_text`                        |
+  | `0007_client_token_remote`            | `0011_client_token_remote`                    |
 
 - **SQLite settings.** WAL, `busy_timeout=5000`, `foreign_keys=ON`. The daemon
   is the only writer ([§9](9-security.md)).

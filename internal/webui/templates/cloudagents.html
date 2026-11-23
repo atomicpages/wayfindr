@@ -1,0 +1,237 @@
+{{define "content"}}{{with .Body}}
+<div class="page-head">
+  <div>
+    <h1>Cloud agents</h1>
+    <p>Connect an always-on agent that runs in the cloud, such as Grok Bot or Muse, to your connectors. You run a tunnel
+      that gives Wayfindr a public https address, and the agent gets its own token, limited to the connectors you
+      pick.</p>
+  </div>
+</div>
+
+<nav aria-label="Setup progress">
+  <ol class="steps">
+    {{range .Steps}}<li class="{{.State}}"{{if .Aria}} aria-current="step"{{end}}><span class="n">{{.N}}</span>{{.Name}}</li>
+    {{end}}
+  </ol>
+</nav>
+
+{{if .Error}}<div class="alert err" role="alert">{{icon "alert"}}<div><b>That didn't work</b><p>{{.Error}}</p></div></div>{{end}}
+
+{{if eq .Stage "agent"}}
+<form class="card" method="get" action="/ui/cloud-agents">
+  <input type="hidden" name="step" value="connectors">
+  <div class="card-head">
+    <h2>Step 1 of 6: Pick your agent</h2>
+    <p>Which cloud agent are you connecting?</p>
+  </div>
+  <div class="card-body form">
+    <fieldset class="field">
+      <legend class="sr">Agent</legend>
+      <div class="options">
+        {{range .Agents}}<label class="check option" for="agent-{{.ID}}"><input type="radio" id="agent-{{.ID}}" name="agent"
+            value="{{.ID}}"{{if .Checked}} checked{{end}}{{if .Disabled}} disabled{{else}} required{{end}}><span class="opt-text"><b>{{.Name}}</b><small
+              class="hint">{{.Blurb}}</small></span></label>
+        {{end}}
+      </div>
+    </fieldset>
+    <div><button class="btn btn-primary" type="submit">Next: connectors</button></div>
+  </div>
+</form>
+{{end}}
+
+{{if eq .Stage "connectors"}}
+<form class="card" method="get" action="/ui/cloud-agents">
+  <input type="hidden" name="step" value="url">
+  <input type="hidden" name="agent" value="{{.Agent.ID}}">
+  <div class="card-head">
+    <h2>Step 2 of 6: Pick connectors for {{.Agent.Name}}</h2>
+    <p>{{.Agent.Name}} will only be able to find and call tools from the connectors you tick.</p>
+  </div>
+  <div class="card-body form">
+    <fieldset class="field">
+      <legend class="sr">Connectors</legend>
+      {{if .Connectors}}
+      <div class="options">
+        {{range .Connectors}}<label class="check option" for="cc-{{.}}"><input type="checkbox" id="cc-{{.}}" name="connector"
+            value="{{.}}"{{if index $.Body.Picked .}} checked{{end}}>{{template "mini" (logo .)}}{{.}}</label>
+        {{end}}
+      </div>
+      {{else}}<span class="muted">No connectors are configured yet. <a href="/ui/add">Add one</a> first.</span>{{end}}
+    </fieldset>
+    <div class="actions">
+      <a class="btn btn-ghost" href="{{.BackHref}}">Back</a>
+      {{if .Connectors}}<button class="btn btn-primary" type="submit">Next: public URL</button>{{end}}
+    </div>
+  </div>
+</form>
+{{end}}
+
+{{if eq .Stage "url"}}
+<form class="card" method="post" action="/ui/cloud-agents/url">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <input type="hidden" name="agent" value="{{.Agent.ID}}">
+  {{range .PickedList}}<input type="hidden" name="connector" value="{{.}}">{{end}}
+  <div class="card-head">
+    <h2>Step 3 of 6: Your public address</h2>
+    <p>The https address that reaches Wayfindr from the internet.</p>
+  </div>
+  <div class="card-body form">
+    <label class="field" for="public-url"><span>Public URL</span>
+      <input id="public-url" name="url" type="url" value="{{.PublicURL}}" placeholder="https://your-name.ngrok-free.dev"
+        autocomplete="off" spellcheck="false" required aria-describedby="public-url-hint">
+      <small class="hint" id="public-url-hint">This is the https address your tunnel (ngrok, Cloudflare Tunnel, or
+        Tailscale Funnel) gives you. Start the tunnel pointing at Wayfindr first. Wayfindr saves it in your config file
+        and never starts a tunnel itself.</small>
+    </label>
+    <div class="actions">
+      <a class="btn btn-ghost" href="{{.BackHref}}">Back</a>
+      <button class="btn btn-primary" type="submit">Save and continue</button>
+    </div>
+  </div>
+</form>
+{{end}}
+
+{{if eq .Stage "token"}}
+<form class="card" method="post" action="/ui/cloud-agents/token">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <input type="hidden" name="agent" value="{{.Agent.ID}}">
+  {{range .PickedList}}<input type="hidden" name="connector" value="{{.}}">{{end}}
+  <div class="card-head">
+    <h2>Step 4 of 6: Create a token for {{.Agent.Name}}</h2>
+    <p>The token lets {{.Agent.Name}} in through your tunnel, to
+      {{range $i, $n := .PickedList}}{{if $i}}, {{end}}<b>{{$n}}</b>{{end}} only. Wayfindr shows it once.</p>
+  </div>
+  <div class="card-body form">
+    <label class="field" for="token-name"><span>Token name</span>
+      <input id="token-name" name="name" type="text" value="{{.TokenName}}" autocomplete="off" spellcheck="false" required>
+      <small class="hint">Shows in the call log, so you can tell which agent made a call.</small>
+    </label>
+    <div class="actions">
+      <a class="btn btn-ghost" href="{{.BackHref}}">Back</a>
+      <button class="btn btn-primary" type="submit">{{icon "key"}}Create token</button>
+    </div>
+  </div>
+</form>
+{{end}}
+
+{{if eq .Stage "done"}}
+<div class="alert ok">{{icon "key"}}<div>
+    <b>Copy the token for {{.TokenName}} now</b>
+    <p>Wayfindr stores only a hash, so this is the only time you'll see it. Keep this page open until the agent is set
+      up. Leaving it loses the token, and you would revoke it and create another.</p>
+    <label class="sr" for="new-token">Token for {{.TokenName}}</label>
+    <div class="copyrow">
+      <input class="secret" id="new-token" type="text" readonly value="{{.Token}}" autocomplete="off" spellcheck="false">
+      <button class="btn btn-outline btn-sm copy" type="button" data-copy="#new-token" aria-label="Copy token for {{.TokenName}}" aria-live="polite">{{icon "copy"}}<span>Copy</span></button>
+    </div>
+  </div>
+</div>
+
+<section class="card" aria-labelledby="test-h">
+  <div class="card-head">
+    <h2 id="test-h">Step 5 of 6: Test the connection</h2>
+    <p>Wayfindr calls your public address the way {{.Agent.Name}} will, with this token.</p>
+  </div>
+  <div class="card-body form">
+    {{with .Test}}{{template "testResult" .}}{{end}}
+    <form method="post" action="/ui/cloud-agents/test">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="agent" value="{{.Agent.ID}}">
+      <input type="hidden" name="name" value="{{.TokenName}}">
+      <input type="hidden" name="token" value="{{.Token}}">
+      <button class="btn btn-primary" type="submit">{{if .Test}}Test again{{else}}Test connection{{end}}</button>
+    </form>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="setup-h">
+  <div class="card-head">
+    <h2 id="setup-h">Step 6 of 6: Set up {{.Agent.Name}}</h2>
+    {{if .Setup.McpURL}}<p>Copy these into {{.Agent.Name}}. It connects to <code>{{.Setup.McpURL}}</code>.</p>{{end}}
+  </div>
+  <div class="card-body form">
+    {{if not .Setup.McpURL}}
+    <div class="alert warn" role="note">{{icon "alert"}}<div><b>No public URL is set</b><p>Go back to step 3 and save the
+          https address your tunnel gives you; the setup text needs it.</p></div></div>
+    {{else if eq .Agent.ID "grok"}}
+    <div class="alert warn" role="note">{{icon "alert"}}<div>
+        <b>Use a personal Bot, not a Team Bot</b>
+        <p>On a Team Bot, everyone on your team uses your token. A coworker asking it to summarise their email would
+          read yours.</p>
+      </div>
+    </div>
+    <p class="note">In Grok, open <b>Connect apps</b>, choose <b>Add a custom connector</b>, then fill in the fields
+      below and press <b>Add plugin</b>:</p>
+    <dl class="review setup">
+      <div><dt>Name</dt><dd><code id="g-name">Wayfindr</code><button class="btn btn-outline btn-sm copy" type="button" data-copy="#g-name" aria-label="Copy connector name" aria-live="polite">{{icon "copy"}}<span>Copy</span></button></dd></div>
+      <div><dt>Type</dt><dd>Remote HTTPS</dd></div>
+      <div><dt>Server URL</dt><dd><code id="g-url">{{.Setup.McpURL}}</code><button class="btn btn-outline btn-sm copy" type="button" data-copy="#g-url" aria-label="Copy server URL" aria-live="polite">{{icon "copy"}}<span>Copy</span></button></dd></div>
+      <div><dt>HTTP header name</dt><dd><code id="g-hname">Authorization</code><button class="btn btn-outline btn-sm copy" type="button" data-copy="#g-hname" aria-label="Copy header name" aria-live="polite">{{icon "copy"}}<span>Copy</span></button></dd></div>
+      <div><dt>HTTP header value</dt><dd><code id="g-hvalue">{{.Setup.Bearer}}</code><button class="btn btn-outline btn-sm copy" type="button" data-copy="#g-hvalue" aria-label="Copy header value" aria-live="polite">{{icon "copy"}}<span>Copy</span></button></dd></div>
+    </dl>
+    <p class="note">On ngrok's free plan, you can also add a second HTTP header: name
+      <code>ngrok-skip-browser-warning</code>, value <code>1</code>. It keeps ngrok's browser warning page out of the
+      way.</p>
+    {{else}}
+    <p class="note">Open a chat with Muse and send it this message. It asks Muse to set Wayfindr up as a custom
+      connector. The message holds no secret.</p>
+    <div class="snippet-wrap">
+      <pre class="snippet" id="muse-message" tabindex="0">{{.Setup.MuseMessage}}</pre>
+      <button class="btn btn-outline btn-sm copy" type="button" data-copy="#muse-message" aria-label="Copy message for Muse" aria-live="polite">{{icon "copy"}}<span>Copy message</span></button>
+    </div>
+    <div class="alert warn" role="note">{{icon "alert"}}<div>
+        <b>Paste the token only into Muse's secure credential prompt</b>
+        <p>Muse asks for the key in a separate prompt. Never type or paste the token into the chat itself.</p>
+      </div>
+    </div>
+    <div class="copyrow">
+      <code id="muse-token">{{.Setup.Token}}</code>
+      <button class="btn btn-outline btn-sm copy" type="button" data-copy="#muse-token" aria-label="Copy token for Muse" aria-live="polite">{{icon "copy"}}<span>Copy token</span></button>
+    </div>
+    {{end}}
+  </div>
+</section>
+{{end}}
+
+<section class="card" aria-labelledby="remote-h">
+  <div class="card-head">
+    <h2 id="remote-h">Your cloud agents</h2>
+    <p>Remote tokens, which can reach Wayfindr through a tunnel. Revoking one takes effect on its next request.</p>
+  </div>
+  {{if .RemoteUnavailable}}
+  <div class="card-body"><p class="muted" role="note">The list of your cloud agents could not be read just now. The token above is
+      still good. Reload this page later to see the list; the daemon log says why.</p></div>
+  {{else}}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Connectors</th>
+          <th class="hide-sm">Created</th>
+          <th>Last used</th>
+          <th class="r"><span class="sr">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Remote}}
+        <tr>
+          <td class="name">{{.Name}} <span class="badge secondary" title="Can reach Wayfindr through a tunnel">remote</span></td>
+          <td>
+            <div class="chips">{{range .Connectors}}<span class="badge secondary">{{template "mini" (logo .)}}{{.}}</span>{{end}}</div>
+          </td>
+          <td class="hide-sm">{{.Created}}</td>
+          <td>{{.LastUsed}}</td>
+          <td class="r">
+            {{template "revoke" (revoke $.CSRF .Name "cloud-agents")}}
+          </td>
+        </tr>
+        {{else}}
+        <tr><td class="empty" colspan="5">No cloud agents yet.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+</section>
+{{end}}{{end}}

@@ -52,7 +52,8 @@ about 2 seconds.
 
 | Change                                  | Takes effect                                                                                                                                                                                     |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `[server]`, `[storage]`                 | On restart. The daemon logs `config change takes effect on restart` with the key.                                                                                                                |
+| `[server] listen`, `[storage]`          | On restart. The daemon logs `config change takes effect on restart` with the key.                                                                                                                |
+| `[server] public_url`                   | At once. Nothing else depends on it.                                                                                                                                                             |
 | `[embedding]` added, removed, or edited | At once. The daemon swaps the embedding client and re-embeds the catalog as needed.                                                                                                              |
 | `[index]`                               | At once. Every HTTP connector is rescheduled.                                                                                                                                                    |
 | `[calls]`                               | At once. A new `retention` applies to calls made from then on, and to pruning from the next hourly prune.                                                                                        |
@@ -75,9 +76,10 @@ daemon, or the CLI looks for it at the new address.
 
 ## `[server]`
 
-| Key      | Type   | Default            |
-| -------- | ------ | ------------------ |
-| `listen` | string | `"127.0.0.1:7777"` |
+| Key          | Type         | Default            |
+| ------------ | ------------ | ------------------ |
+| `listen`     | string       | `"127.0.0.1:7777"` |
+| `public_url` | string (URL) | none               |
 
 ### `listen`
 
@@ -103,6 +105,34 @@ callback, and the CLI's admin API.
 `listen` also sets the default OAuth redirect URI,
 `http://<listen>/oauth/callback`, and the auth link,
 `http://<listen>/auth/<connector>`.
+
+### `public_url`
+
+The `https` address a tunnel serves the daemon at, such as
+`"https://wayfindr.example.com"`. Leave it out when you run no tunnel. You run
+the tunnel (ngrok, Cloudflare Tunnel, Tailscale Funnel, or a proxy of your own);
+Wayfindr never starts or configures one.
+
+```toml
+[server]
+public_url = "https://wayfindr.example.com"
+```
+
+- It must be an absolute `https` URL. The path may be empty or `/`; it can't
+  have a query string, a fragment, or a username or password. Anything else is
+  rejected, for example `server.public_url: must not have a query string`.
+- It is informational only. Wayfindr never compares a request against it: no
+  request is let in or kept out because of it. What lets a request through a
+  tunnel is a [remote client token](./cli#wayfindr-token-create).
+- The [web console](../guide/console#connecting-a-cloud-agent) uses it for the
+  text you paste into a cloud agent, and to test the connection.
+- A reload applies it at once; it needs no restart.
+- Set it by hand, in the console's Cloud agents page, or through the admin API
+  ([`PUT /admin/server/public-url`](./http#admin)), which keeps the rest of the
+  file as it was.
+
+See [Cloud agents](../guide/cloud-agents) for how to set up the tunnel and the
+agent.
 
 ## `[storage]`
 
@@ -280,8 +310,11 @@ letter case): Wayfindr sends the OAuth token in it, so the config is rejected.
 
 `"sse"` forces the legacy HTTP+SSE transport. Leave it out to use Streamable
 HTTP. Without it, Wayfindr still falls back to HTTP+SSE when the Streamable HTTP
-`initialize` POST gets a 4xx other than 401 or 403. Any other value is an error
-(`must be "sse" or absent, not "…"`).
+`initialize` POST gets a 4xx other than 401 or 403. A 401 or 403 to any request
+of the connect, `server/discover` included, rules the fallback out. With an
+`[auth]` table, a 401, or a 403 with `insufficient_scope`, sends the connector
+to `needs_auth`. Any other refusal leaves it `unreachable`. Any other value is
+an error (`must be "sse" or absent, not "…"`).
 
 #### `timeout`
 

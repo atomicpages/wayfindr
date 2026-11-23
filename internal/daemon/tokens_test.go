@@ -63,7 +63,7 @@ func TestScopedTokenIsAcceptedFromCreationAndRefusedFromItsRevoke(t *testing.T) 
 	r := serve(t, h, opts, tokenConfig(t))
 	clock.waitArmed(t, epoch.Add(time.Minute))
 
-	created, err := r.admin().CreateToken(t.Context(), "nightly", []string{"files"})
+	created, err := r.admin().CreateToken(t.Context(), admin.TokenSpec{Name: "nightly", Connectors: []string{"files"}})
 
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
@@ -114,7 +114,7 @@ func TestScopedTokensSurviveARestartWithTheirLastUse(t *testing.T) {
 	h := newHost(t)
 	r := serve(t, h, h.options(t), tokenConfig(t))
 
-	created, err := r.admin().CreateToken(t.Context(), "nightly", []string{"files"})
+	created, err := r.admin().CreateToken(t.Context(), admin.TokenSpec{Name: "nightly", Connectors: []string{"files"}})
 
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)

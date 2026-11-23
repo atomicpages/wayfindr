@@ -2,6 +2,7 @@ package webui_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -31,6 +32,49 @@ type fakeAdmin struct {
 	createErr error
 	adds      []admin.ConnectorSpec
 	addErr    error
+	// createdRemote and createdConns record what CreateToken was asked for.
+	createdRemote []bool
+	createdConns  [][]string
+	// publicURL is server.public_url; setURLs records each SetPublicURL.
+	publicURL string
+	setURLs   []string
+	setURLErr error
+	// testResult is what TestRemote answers; tested records its tokens.
+	testResult admin.RemoteTestResult
+	testErr    error
+	tested     []string
+	// statusErr, listErr, and publicURLErr make Status, ListTokens, and
+	// PublicURL fail.
+	statusErr, listErr, publicURLErr error
+}
+
+func (f *fakeAdmin) PublicURL(context.Context) (admin.PublicURL, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return admin.PublicURL{URL: f.publicURL}, f.publicURLErr
+}
+
+func (f *fakeAdmin) SetPublicURL(_ context.Context, u string) (admin.PublicURL, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.setURLs = append(f.setURLs, u)
+
+	if f.setURLErr != nil {
+		return admin.PublicURL{}, f.setURLErr
+	}
+
+	f.publicURL = u
+
+	return admin.PublicURL{URL: u}, nil
+}
+
+func (f *fakeAdmin) TestRemote(_ context.Context, token string) (admin.RemoteTestResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tested = append(f.tested, token)
+
+	return f.testResult, f.testErr
 }
 
 func (f *fakeAdmin) AddConnector(_ context.Context, spec admin.ConnectorSpec) (admin.ConnectorAdded, error) {
@@ -52,7 +96,7 @@ func (f *fakeAdmin) addCount() int {
 	return len(f.adds)
 }
 
-func (f *fakeAdmin) Status(context.Context) (admin.Status, error) { return f.status, nil }
+func (f *fakeAdmin) Status(context.Context) (admin.Status, error) { return f.status, f.statusErr }
 
 func (f *fakeAdmin) StartAuth(_ context.Context, c string, _ admin.AuthStart) (admin.AuthFlow, error) {
 	if f.device != nil {
@@ -79,19 +123,21 @@ func (f *fakeAdmin) Tools(_ context.Context, c string) (admin.ToolList, error) {
 }
 
 func (f *fakeAdmin) ListTokens(context.Context) (admin.TokenList, error) {
-	return admin.TokenList{}, nil
+	return admin.TokenList{}, f.listErr
 }
 
-func (f *fakeAdmin) CreateToken(_ context.Context, name string, connectors []string) (admin.TokenCreated, error) {
+func (f *fakeAdmin) CreateToken(_ context.Context, spec admin.TokenSpec) (admin.TokenCreated, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.created = append(f.created, name)
+	f.created = append(f.created, spec.Name)
+	f.createdRemote = append(f.createdRemote, spec.Remote)
+	f.createdConns = append(f.createdConns, spec.Connectors)
 
 	if f.createErr != nil {
 		return admin.TokenCreated{}, f.createErr
 	}
 
-	return admin.TokenCreated{Name: name, Connectors: connectors, Token: "wf_s_shown-once"}, nil //nolint:gosec // G101: a test fixture
+	return admin.TokenCreated{Name: spec.Name, Connectors: spec.Connectors, Token: "wf_s_shown-once"}, nil //nolint:gosec // G101: a test fixture
 }
 
 func (f *fakeAdmin) RevokeToken(_ context.Context, name string) (admin.TokenRevoked, error) {
@@ -131,10 +177,17 @@ type console struct {
 
 func newConsole(t *testing.T) *console {
 	t.Helper()
+
+	return newConsoleLog(t, zerolog.NewTestWriter(t))
+}
+
+// newConsoleLog is newConsole with the console's log going to w.
+func newConsoleLog(t *testing.T, w io.Writer) *console {
+	t.Helper()
 	clock := &fakeClock{now: time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)}
 	sessions := webui.NewSessions(clock.Now)
 	fa := &fakeAdmin{status: admin.Status{Version: "v1.2.3"}}
-	h, err := webui.New(webui.Options{Admin: fa, Sessions: sessions, Now: clock.Now, Logger: zerolog.New(zerolog.NewTestWriter(t))})
+	h, err := webui.New(webui.Options{Admin: fa, Sessions: sessions, Now: clock.Now, Logger: zerolog.New(w)})
 
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -476,7 +529,7 @@ func (*richAdmin) Tools(_ context.Context, c string) (admin.ToolList, error) {
 func (*richAdmin) ListTokens(context.Context) (admin.TokenList, error) {
 	used := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
 
-	return admin.TokenList{Tokens: []admin.Token{{Name: "ci-bot", Connectors: []string{"github"}, LastUsedAt: &used}}}, nil
+	return admin.TokenList{Tokens: []admin.Token{{Name: "ci-bot", Connectors: []string{"github"}, LastUsedAt: &used}, {Name: "grok", Connectors: []string{"github"}, Remote: true}}}, nil
 }
 
 func TestPagesRender(t *testing.T) {
@@ -513,7 +566,7 @@ func TestPagesRender(t *testing.T) {
 		{"/ui/calls?connector=github&result=failed", []string{"create_issue", "812 ms", "unauthorized", "Kept for 30 days", "Nov 11 09:30",
 			`<details class="why"><summary aria-controls="why-1">`, `<tr class="why-row" id="why-1">`, "jira needs you to &lt;b&gt;sign in&lt;/b&gt;."}},
 		{"/ui/search?q=open+a+ticket", []string{"github.", "0.3095", "w-100", "word rank 1, meaning rank 2", "linear: linear needs you to sign in."}},
-		{"/ui/tokens", []string{"ci-bot", "1 h ago", `<details class="multi">`, `name="connector" value="jira"`, "/ui/static/console.js"}},
+		{"/ui/tokens", []string{"ci-bot", "1 h ago", `<details class="multi">`, `name="connector" value="jira"`, "/ui/static/console.js", ">remote</span>"}},
 		{"/ui/tokens?done=revoked&name=ci-bot", []string{"Revoked ci-bot."}},
 	} {
 		rec := c.get(tc.path, ck)
@@ -530,6 +583,11 @@ func TestPagesRender(t *testing.T) {
 				t.Errorf("GET %s: missing %q", tc.path, w)
 			}
 		}
+	}
+
+	// Only the remote token wears the badge.
+	if got := strings.Count(c.get("/ui/tokens", ck).Body.String(), ">remote</span>"); got != 1 {
+		t.Errorf("GET /ui/tokens shows %d remote badges, want 1 (grok only)", got)
 	}
 
 	if got := c.get("/ui/connectors/nope", ck).Code; got != http.StatusNotFound {

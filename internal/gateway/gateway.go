@@ -172,7 +172,18 @@ func New(opts Options) *Gateway {
 	server.AddTool(callToolTool(), g.callTool)
 	g.handler = mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return server },
-		&mcp.StreamableHTTPOptions{Stateless: true, MaxRequestBodyBytes: maxRequestBody},
+		&mcp.StreamableHTTPOptions{
+			Stateless:           true,
+			MaxRequestBodyBytes: maxRequestBody,
+			// httpd's host guard owns the Host and DNS-rebinding decision,
+			// and is stricter than the SDK's: it checks the port and the
+			// forwarding headers too, and lets a remote request reach /mcp
+			// only with a remote client token (ADR 0021, design §7.7). The
+			// SDK's own check would answer 403 to every such request on a
+			// loopback listener, so a tunnel that keeps the public Host
+			// could never reach the gateway.
+			DisableLocalhostProtection: true,
+		},
 	)
 
 	return g

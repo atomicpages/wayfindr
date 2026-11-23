@@ -489,6 +489,27 @@ func TestEditAdvice(t *testing.T) {
 	}
 }
 
+// TestReason: the reason is the advice's summary without the CLI's
+// "could not change it safely: " lead-in, which only an unsafe edit has.
+func TestReason(t *testing.T) {
+	tests := []struct {
+		err  config.Error
+		want string
+	}{
+		{config.Error{Case: config.CaseUnparsable}, "it does not parse, or would not after the edit"},
+		{config.Error{Case: config.CaseServerNotTable}, "server is not written as a [server] table"},
+		{config.Error{Case: config.CaseEditNotFound, Connector: "gmail"}, "no connector is called gmail"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.err.Case), func(t *testing.T) {
+			if got := config.Reason(&tt.err); got != tt.want {
+				t.Errorf("Reason(%s) = %q, want %q", tt.err.Case, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestEditConnectorKeyNotSetNames: the error names the key as TOML writes
 // it.
 func TestEditConnectorKeyNotSetNames(t *testing.T) {

@@ -46,7 +46,7 @@ make snapshot       # every release target + checksums.txt into dist/, unpublish
 
 Releases are cut by pushing a `v*` tag; see `docs/internal/releasing.md`.
 
-Run one package's tests with `go test ./internal/<pkg>`. Postgres store tests skip unless `WAYFINDR_TEST_PG_DSN` is a `postgres://` URL whose role can create databases; `make test-postgres` sets it, and `make check` does not need Docker.
+Run one package's tests with `go test ./internal/<pkg>`. Postgres store tests skip unless `WAYFINDR_TEST_PG_DSN` is a `postgres://` URL whose role can create databases; `make test-postgres` sets it, and `make check` does not need Docker. For repeated runs, `compose.yaml` keeps the same pgvector image up on `127.0.0.1:55432` (usage in its header). Docker here is OrbStack: run `orb start` if `docker info` fails.
 
 `make conformance` is not part of `check`: it runs `scripts/conformance.sh`, which starts a throwaway daemon (temp config and data, env master key and token, one fake stdio connector) and runs `@modelcontextprotocol/conformance` against `/mcp` for 2025-06-18, 2025-11-25, and 2026-07-28. It fails on any result not in `scripts/conformance-baseline/<version>.yml`; results go to `bin/conformance/`. See `docs/internal/compat.md`.
 

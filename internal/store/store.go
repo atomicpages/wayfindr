@@ -124,10 +124,11 @@ type Store interface {
 	// error wrapping ErrExists when the user already has a token of that
 	// name or any user has one with that digest, and refuses an empty
 	// t.Connectors or a zero t.CreatedAt. CreatedAt is kept to the
-	// millisecond; t.LastUsedAt is ignored.
+	// millisecond; t.LastUsedAt is ignored. t.Remote is stored as given and
+	// is not changed afterwards.
 	CreateClientToken(ctx context.Context, t ClientToken) error
-	// ListClientTokens returns the user's scoped client tokens, digests
-	// included, ordered by name.
+	// ListClientTokens returns the user's scoped client tokens, digests and
+	// Remote included, ordered by name.
 	ListClientTokens(ctx context.Context, userID string) ([]ClientToken, error)
 	// DeleteClientToken removes a scoped client token, or returns
 	// ErrNotFound.
@@ -339,7 +340,10 @@ type ClientToken struct {
 	Digest [sha256.Size]byte
 	// Connectors are the connectors the token may use; at least one.
 	Connectors []string
-	CreatedAt  time.Time
+	// Remote is whether the token may reach /mcp through a tunnel (ADR
+	// 0021). It is set at creation and never changes.
+	Remote    bool
+	CreatedAt time.Time
 	// LastUsedAt is when the token was last used, as TouchClientTokens
 	// recorded it; nil until first use.
 	LastUsedAt *time.Time

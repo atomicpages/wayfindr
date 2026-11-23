@@ -50,15 +50,17 @@ type dialed struct {
 // fallsBack reports whether a failed Streamable connect should be retried
 // over HTTP+SSE: its initialize POST got a 4xx other than 401 or 403, which
 // is how a legacy SSE server answers (design §7.2). 401 and 403 are auth
-// failures, which SSE would meet too.
+// failures, which SSE would meet too, so one to any request of the connect
+// (server/discover included), or an auth decision on one, rules the
+// fallback out (wayfindr-n6nc).
 func (d dialed) fallsBack() bool {
-	if d.fallback == nil {
+	if d.fallback == nil || d.probe.refused() {
 		return false
 	}
 
 	st := d.probe.initializeStatus()
 
-	return st >= 400 && st < 500 && st != http.StatusUnauthorized && st != http.StatusForbidden
+	return st >= 400 && st < 500
 }
 
 // dial builds the transport for a connector, resolving its templates through
@@ -165,8 +167,9 @@ func (w stderrLog) Write(p []byte) (int, error) {
 //
 // sse says to use HTTP+SSE: the config forces it, or an earlier connect fell
 // back to it. Otherwise the transport is Streamable HTTP, with an SSE
-// fallback for connect to try if the Streamable connect fails after the
-// first POST got a 4xx other than 401 or 403.
+// fallback for connect to try if the Streamable initialize got a 4xx and no
+// request of the connect was refused (401 or 403) or ended by an auth
+// decision.
 func (m *Manager) dialHTTP(ctx context.Context, c config.Connector, sse bool) (dialed, error) {
 	var d dialed
 	endpoint, used, err := c.URL.ResolveRefs(ctx, m.resolver)
@@ -378,32 +381,67 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(req)
 }
 
-// probeTransport records how the upstream answered the initialize POST.
-// Its status is how a legacy HTTP+SSE server shows it doesn't speak
-// Streamable HTTP. A client at 2026-07-28 or later POSTs server/discover
-// first, and every server older than that answers it with a 4xx, so only
-// initialize counts. A failed initialize's body is kept too: it is the
-// upstream's own account of the failure, which the SDK drops unless it is
-// a JSON-RPC error.
+// probeTransport watches the requests of a Streamable connect, until
+// settle says it succeeded. It records how the upstream answered the
+// initialize POST: its status is how a legacy HTTP+SSE server shows it
+// doesn't speak Streamable HTTP. A client at 2026-07-28 or later POSTs
+// server/discover first, and every server older than that answers it with
+// a 4xx, so only initialize counts. A failed initialize's body is kept
+// too: it is the upstream's own account of the failure, which the SDK
+// drops unless it is a JSON-RPC error.
+//
+// It also ends the connect at the first auth decision: an error from the
+// auth hook (one with AuthCase(), such as a step-up on a 403
+// insufficient_scope) fails that request and every later one of the
+// connect with the same error, unsent. The SDK falls back from a failed
+// server/discover to initialize whatever the failure, and the answer to
+// that initialize would otherwise stand in for the auth error
+// (wayfindr-n6nc).
 type probeTransport struct {
 	base http.RoundTripper
 
-	mu     sync.Mutex
-	probed bool
-	status int    // 0 if initialize got no response
-	body   string // a prefix of the body of a non-2xx initialize answer
+	mu      sync.Mutex
+	settled bool
+	probed  bool
+	status  int    // 0 if initialize got no response
+	body    string // a prefix of the body of a non-2xx initialize answer
+	denied  bool   // some request got a 401 or 403
+	authErr error  // the first auth decision, if any
 }
 
 func (t *probeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.Method != http.MethodPost || t.done() || rpcMethod(req) != "initialize" {
+	t.mu.Lock()
+	settled, authErr := t.settled, t.authErr
+	t.mu.Unlock()
+
+	if settled {
 		return t.base.RoundTrip(req)
 	}
 
+	if authErr != nil {
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+
+		return nil, authErr
+	}
+
+	initialize := req.Method == http.MethodPost && rpcMethod(req) == "initialize"
 	resp, err := t.base.RoundTrip(req)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.probed {
+	if err != nil {
+		var ac authCaser
+
+		if t.authErr == nil && errors.As(err, &ac) {
+			t.authErr = err
+		}
+	} else if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		t.denied = true
+	}
+
+	if !initialize || t.probed {
 		return resp, err
 	}
 
@@ -422,11 +460,12 @@ func (t *probeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, err
 }
 
-func (t *probeTransport) done() bool {
+// settle ends the watch: the connect succeeded, and the session's requests
+// go to base untouched.
+func (t *probeTransport) settle() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	return t.probed
+	t.settled = true
 }
 
 // initializeStatus is the status of the initialize POST, or 0 if there was
@@ -438,12 +477,34 @@ func (t *probeTransport) initializeStatus() int {
 	return t.status
 }
 
-// annotate adds the body of a failed initialize answer to err, the error
-// of the connect it failed. err is returned unchanged when there is no
-// body.
-func (t *probeTransport) annotate(err error) error {
+// refused reports whether a request of the connect was refused: the
+// upstream answered 401 or 403, or the auth hook failed it with an auth
+// error.
+func (t *probeTransport) refused() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	return t.denied || t.authErr != nil
+}
+
+// failure is err, the error of the connect it failed, made to tell why.
+// After an auth decision it is err if that carries one (the request the
+// probe failed with it did, inside the http.Client's *url.Error), else the
+// decision itself. Otherwise it is err with the body of a failed
+// initialize answer added, if there was one, else err unchanged.
+func (t *probeTransport) failure(err error) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.authErr != nil {
+		var ac authCaser
+
+		if errors.As(err, &ac) {
+			return err
+		}
+
+		return t.authErr
+	}
 
 	if t.body == "" {
 		return err

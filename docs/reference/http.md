@@ -7,7 +7,7 @@ of it.
 
 | Route                                  | Methods       | Who uses it                                      | Checks                                                                        |
 | -------------------------------------- | ------------- | ------------------------------------------------ | ----------------------------------------------------------------------------- |
-| [`/mcp`](#mcp)                         | `POST`        | MCP clients and the stdio shim                   | Host, Origin, bearer                                                          |
+| [`/mcp`](#mcp)                         | `POST`        | MCP clients, the stdio shim, and cloud agents    | Host (or a remote client token), Origin, bearer                               |
 | [`/healthz`](#healthz)                 | `GET`, `HEAD` | The shim and the CLI, to see if the daemon is up | Host, Origin                                                                  |
 | [`/auth/<connector>`](#auth-connector) | `GET`, `POST` | You, in a browser: the auth link                 | Host, Origin; the `POST` also needs a same-origin `Origin` and the form nonce |
 | [`/oauth/callback`](#oauth-callback)   | `GET`         | The authorization server, through your browser   | The flow's `state` only                                                       |
@@ -27,12 +27,26 @@ attacks.
 (such as `127.0.0.2` for `listen = "127.0.0.2:7777"`), with exactly the port the
 daemon listens on. Names are compared, never resolved. Any other `Host` gets
 `404 page not found` for every path and method, so a foreign page can't even
-learn which routes exist.
+learn which routes exist. The one exception is `/mcp` with a remote client
+token, below.
 
-A request with a `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`,
+A request with a `Forwarded`, `Via`, `X-Forwarded-For`, `X-Forwarded-Host`,
 `X-Forwarded-Proto`, `X-Real-IP`, or `CF-Connecting-IP` header is treated as
 foreign whatever its `Host` says, so a proxy or tunnel that rewrites `Host` to
-`127.0.0.1` still reaches only `/oauth/callback`.
+`127.0.0.1` still reaches only `/oauth/callback`, except `/mcp` with a remote
+client token.
+
+**Remote client tokens.** A foreign request, by its `Host` or a forwarding
+header, reaches `/mcp` if and only if it carries exactly one
+`Authorization: Bearer` header with a scoped client token created as remote
+([`wayfindr token create --remote`](./cli#wayfindr-token-create)). It then gets
+the Origin check and every other check a local request gets. With no token, the
+default client token, a scoped token that isn't remote, or a wrong or revoked
+token, it gets the same `404 page not found` as any other foreign request: no
+`401` and no `WWW-Authenticate`. Every other route but `/oauth/callback` stays
+local: a foreign request gets `404` there whatever token it carries.
+[Cloud agents](../guide/cloud-agents) shows how to set one up, and
+[ADR 0021](../adr/0021-remote-client-tokens) says why it works this way.
 
 **Origin.** Every route except `/oauth/callback` refuses a request whose
 `Origin` header is present and not loopback, or that has more than one `Origin`
@@ -48,8 +62,8 @@ client token is either the default client token, the one `wayfindr init` writes
 [scoped client token](/guide/access/scoped-tokens) made with
 [`wayfindr token create`](./cli#wayfindr-token-create). The default token is
 compared in constant time; a scoped token is looked up by its SHA-256. A
-missing, wrong, or revoked token gets `401 unauthorized` with
-`WWW-Authenticate: Bearer`. A revoke applies from the next request on.
+missing, wrong, or revoked token on a local request gets `401 unauthorized`
+with `WWW-Authenticate: Bearer`. A revoke applies from the next request on.
 
 `/admin/` takes the default client token only. A valid scoped token there gets
 `403` `This client token cannot use the admin API.`
@@ -89,6 +103,11 @@ data: {"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}},"protocolVer
   connectors. Every other connector is as if it weren't configured, before any
   profile or project scope applies. See
   [Scoped client tokens](/guide/access/scoped-tokens).
+- **Through a tunnel.** A request that arrives through a tunnel or proxy is
+  served only with a remote client token (see
+  [Host and Origin checks](#host-and-origin-checks)), and a cloud agent connects
+  this way. Any other request through a tunnel gets `404`. See
+  [Cloud agents](../guide/cloud-agents).
 - **Body limit.** 4 MiB. A larger body gets `413`
   `request body exceeds 4194304 bytes`.
 - **Timeouts.** The server times out only on slow request headers (10 seconds).
@@ -172,8 +191,10 @@ default redirect URI, `http://<listen>/oauth/callback`. If a connector sets
 [`redirect_uri`](./configuration#connectors-name-auth), for example to an HTTPS
 tunnel that forwards here, the browser arrives through that instead.
 
-This is the only route served on any `Host` and through a proxy or tunnel, so a
-tunnel works, and it has no Origin check. Its guard is the OAuth `state`
+This is the only route served on any `Host` and through a proxy or tunnel with
+no token. (`/mcp` is served through a tunnel too, but only with a remote client
+token.) That is why a tunnel works for the callback, and the route has no Origin
+check. Its guard is the OAuth `state`
 parameter: it must match a pending, unexpired flow this daemon started, and it
 can be used once.
 
@@ -262,14 +283,81 @@ Every route, all unstable:
 | `GET /admin/calls`                      | `calls`                                                                                | The call log, filtered by `connector`, `since`, `errors`, and `limit`.                                                                                                                                                                                                  |
 | `POST /admin/search`                    | `search`                                                                               | Run `search_tools` for a query, with each result's scores.                                                                                                                                                                                                              |
 | `GET /admin/tools/{connector}`          | `connector tools`, `scope <connector>`                                                 | Every tool the upstream serves now, its class, its definition, and whether the tools list exposes it.                                                                                                                                                                   |
-| `POST /admin/tokens`                    | `token create`                                                                         | Create a scoped client token. The answer has its value, once.                                                                                                                                                                                                           |
+| `POST /admin/tokens`                    | `token create`                                                                         | Create a scoped client token; `"remote": true` in the body makes it a remote one. The answer has its value, once.                                                                                                                                                       |
 | `GET /admin/tokens`                     | `token list`                                                                           | List scoped client tokens, never their values.                                                                                                                                                                                                                          |
 | `DELETE /admin/tokens/{name}`           | `token revoke`                                                                         | Revoke a scoped client token, from the next request on.                                                                                                                                                                                                                 |
 | `POST /admin/ui/login`                  | `ui`                                                                                   | Issue a one-time login link for the web console.                                                                                                                                                                                                                        |
 | `POST /admin/connectors`                | The web console                                                                        | Add a connector to the daemon's config file, store its secrets, and report it once it has connected.                                                                                                                                                                    |
+| `GET /admin/server/public-url`          | The web console                                                                        | The running config's `server.public_url` as `{"public_url": "…"}`, empty when none is set.                                                                                                                                                                              |
+| `PUT /admin/server/public-url`          | The web console                                                                        | Write `server.public_url` to the daemon's config file and apply it at once. The body is `{"public_url": "https://…"}`; an empty string removes the key. An invalid URL is `400`.                                                                                        |
+| `POST /admin/remote/test`               | The web console                                                                        | Test a cloud agent's path: send MCP requests to `server.public_url` with the remote token in the body `{"token": "…"}`. The answer is always `200` with an `outcome`; see [Testing a cloud agent's connection](#remote-test).                                           |
 
 A path it doesn't know gets `404`, and a known path with the wrong method `405`.
 A route that refuses a request answers with a status and a one-line, plain-text
 message, which the CLI prints as that sentence alone, such as
 `No connector named "nope" is configured.` The bodies are the CLI's `--json`
 output where it has one; see each command in the [CLI reference](./cli).
+
+### Testing a cloud agent's connection {#remote-test}
+
+`POST /admin/remote/test` is what the console's Cloud agents page runs after it
+creates a remote token. It takes the token's value in the body,
+`{"token": "wf_s_…"}`, and sends MCP requests to `<server.public_url>/mcp` the
+way a cloud agent would:
+
+1. An `initialize` and a `tools/list`, with `Authorization: Bearer <token>`.
+2. The same `initialize` with no `Authorization` header. A request that really
+   came from the internet gets `404`. If the tunnel or proxy adds no forwarding
+   header and keeps a loopback `Host`, Wayfindr takes the request for a local
+   one and answers `401` with `WWW-Authenticate: Bearer`: the default client
+   token would then work from the internet. Only that exact `Bearer` challenge
+   counts: a proxy's own bearer auth names a realm (`Bearer realm="…"`), which
+   is not Wayfindr's. The test fails with
+   `proxy_treats_remote_as_local` whatever step 1 said: step 2 runs whenever
+   step 1 got an HTTP answer (not a network failure, a timeout, a redirect, a
+   web page, or a tunnel provider's `404`), and its warning outranks `ok`, `token_refused`, and `not_found`.
+
+A `404` counts as Wayfindr's only when it is Wayfindr's own: a `text/plain` body
+of `404 page not found`, with no `ngrok-error-code` header. Any other `404`,
+such as ngrok's `ERR_NGROK_3200` "endpoint is offline", is the tunnel provider
+answering, and ends the test as `unreachable`, unless the token's request
+already failed: then that outcome stands. So `ok` and
+`not_found` are both Wayfindr's own answer, and a `401` or `403` for the token
+means a login or access check in front of Wayfindr, which answers `404` there.
+
+The daemon sends the token to the public URL for this one request. It never
+stores or logs it, follows no redirect, reads at most 1 MiB of any answer, and
+gives up after 10 seconds. The call's own failures are the usual statuses
+(`400` for a body that is not `{"token": "…"}`, `413`, `501`); every outcome of
+the test itself, failures included, is `200`:
+
+```json
+{
+  "outcome": "ok",
+  "ok": true,
+  "message": "It works. A cloud agent with this token reaches Wayfindr at https://wayfindr.example.com/mcp and sees 2 connectors.",
+  "url": "https://wayfindr.example.com/mcp",
+  "connectors": 2,
+  "tools": 2
+}
+```
+
+`outcome` is one of these, and `ok` is true only for `ok`. `message` says what
+happened in plain words and `action` what to do; both are for people, so match
+on `outcome`. `status` is the HTTP status that decided it, when there was one.
+`tools` is what `tools/list` returned through the tunnel, always the two
+meta-tools, and `connectors` is how many connectors the token may use.
+
+| `outcome`                      | Meaning                                                                                                                                              |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ok`                           | The token reached the gateway and a tokenless request got the `404` a remote one gets.                                                               |
+| `not_configured`               | `server.public_url` is not set.                                                                                                                      |
+| `unreachable`                  | The name does not resolve, the connection was refused, the network is down, or the tunnel provider answered `404` itself: the tunnel is not running. |
+| `tls_error`                    | The certificate is untrusted or for another name, or the address does not speak https.                                                               |
+| `timeout`                      | No complete answer in 10 seconds.                                                                                                                    |
+| `interstitial`                 | A web page answered instead of Wayfindr: a tunnel's login, warning, or offline page.                                                                 |
+| `redirect`                     | The address answered with a redirect, which the test does not follow.                                                                                |
+| `not_found`                    | Wayfindr's own `404` for the token: not a remote token, a wrong or revoked token, a wrong address, or a Wayfindr without remote tokens.              |
+| `token_refused`                | `401` or `403` for the token: a login or access check in front of Wayfindr, which answers `404`, not `401`, through a tunnel.                        |
+| `proxy_treats_remote_as_local` | A tokenless request got `401` with Wayfindr's own `Bearer` challenge, whatever the token got. Not safe.                                              |
+| `unexpected_response`          | Anything else: a 5xx, an answer that is not MCP, or a tokenless request that did not get the usual 404.                                              |

@@ -1,0 +1,28 @@
+# Long-lived Postgres for the Postgres store tests, the same image as
+# `make test-postgres` (PG_IMAGE in the Makefile). Use it when you want to run
+# the Postgres tests repeatedly, or one package at a time, without a fresh
+# container per run:
+#
+#   docker compose up -d --wait
+#   WAYFINDR_TEST_PG_DSN='postgres://postgres:wayfindr@127.0.0.1:55432/postgres?sslmode=disable' \
+#     go test -count=1 ./internal/store/... ./internal/setup/...
+#   docker compose down -v
+#
+# The tests create and drop their own databases, so the role must be able to
+# create databases; the superuser here can. Bound to loopback only.
+name: wayfindr-dev
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg17
+    environment:
+      POSTGRES_PASSWORD: wayfindr
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "127.0.0.1"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+    tmpfs:
+      - /var/lib/postgresql/data

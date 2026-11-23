@@ -93,13 +93,50 @@ connectors.
 
 ## List and revoke tokens
 
-`wayfindr token list` shows each token's connectors and when it was last used;
-`--json` prints the daemon's response as JSON.
+`wayfindr token list` shows each token's connectors, whether it is
+[remote](#remote-tokens), and when it was last used; `--json` prints the daemon's
+response as JSON.
 `wayfindr token revoke <name>` deletes one, and every client using it is refused
 from its next request on, with no restart.
 
 A token's connectors can't be changed: revoke it and create a new one. Scoped
 tokens don't expire. See [`wayfindr token`](/reference/cli#wayfindr-token).
+
+## Remote tokens
+
+Every token above is for a client on your machine. A cloud agent, such as Grok
+Bot or Muse, runs in a vendor's cloud and reaches Wayfindr through a tunnel you
+run. A request through a tunnel gets `404` on `/mcp` with any token, unless the
+token is **remote** (see [Loopback only](../security#loopback-only)). A remote
+token is a scoped token made for that one case.
+
+Make one with `--remote`, naming only the connectors the agent needs:
+
+```text
+$ wayfindr token create grok-bot --connector github --remote
+Created remote client token grok-bot. It can use: github.
+wf_s_9d2f…
+This is the only time it is shown; store it where the client can read it.
+```
+
+The [console's Cloud agents page](../console#connecting-a-cloud-agent) makes one
+for you and walks you through the rest. The
+[Cloud agents guide](../cloud-agents) covers the tunnel and each agent.
+
+- **Only a scoped token can be remote.** The default client token never is.
+- **It is fixed when you create it.** Like its connectors, `remote` can't be
+  changed. To make a local token remote, or the reverse, revoke it and create a
+  new one.
+- **It still reaches only its connectors,** and never the admin API, the
+  console, or auth links. It works locally too, like any scoped token.
+- **Revoke it to cut an agent off.** The next request with it gets `404` through
+  a tunnel, with no restart.
+- **A leaked remote token works from anywhere** until you revoke it, and it
+  doesn't expire. `wayfindr calls` names the token behind each call, so you can
+  read back what the agent did.
+
+`wayfindr token list` shows `yes` in the **REMOTE** column for these, and the
+console marks them with a `remote` badge.
 
 `wayfindr calls` records which token each call used: `default` or the scoped
 token's name. Use it to see what an unattended agent did.

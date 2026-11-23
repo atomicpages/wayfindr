@@ -53,6 +53,19 @@ check that is not listed, and on a listed check that now passes. Results (one
 Knobs: `CONFORMANCE_VERSIONS="2026-07-28"` runs one version, and
 `CONFORMANCE_ARGS="--scenario tools-list"` runs one scenario.
 
+To test a daemon that is already running (for example one reached through a
+tunnel), set `CONFORMANCE_URL` to its `/mcp` URL (`http://` or `https://`) and
+`CONFORMANCE_TOKEN` to its bearer token. Then the script starts no daemon: it
+runs the same suite against that URL, with the same proxy adding the token, and
+compares to the same baselines. Set both variables or neither; setting one alone
+fails. The token goes only to the proxy's environment, and the script never
+prints it. The daemon sees the URL's host name in `Host`, so its DNS-rebinding
+guard judges that name.
+
+```bash
+CONFORMANCE_URL=http://127.0.0.1:7777/mcp CONFORMANCE_TOKEN="$(cat <data dir>/client-token)" make conformance
+```
+
 ## Automated: `make conformance-client`
 
 ```bash
@@ -414,8 +427,14 @@ extensions `client-credentials-basic`, `client-credentials-jwt`, and
 `wif-jwt-bearer` pass at both versions; the harness maps their contexts to
 `grant = "client_credentials"` (with `client_secret`, or the private key as
 `signing_key`) and `grant = "jwt_bearer"` (the workload JWT as
-`assertion.value`), and no other scenario changed. Both versions match their
-baselines and the target exits 0. Cells are checks passed / failed / warned as
+`assertion.value`), and no other scenario changed. Re-run on 2026-11-22 for
+wayfindr-n6nc: an auth decision on any request of a connect now ends it, so the
+403 `insufficient_scope` on `server/discover` reaches `needs_auth` (step_up) and
+`auth/scope-step-up:scope-step-up-escalation` passes at 2026-07-28; the step-up
+and retry-limit scenarios run more rounds, and the blocked `initialize` no
+longer runs a second discovery, one `prm-pathbased-requested` fewer in
+`metadata-var2` and `resource-mismatch`. Both versions match their baselines
+and the target exits 0. Cells are checks passed / failed / warned as
 the suite counts them (a check repeated in one scenario counts each time). A
 dash means the requirement set does not list the scenario at that version.
 
@@ -430,19 +449,19 @@ dash means the requirement set does not list the scenario at that version.
 | request-metadata                    | -           | 6/0/0 pass      |
 | auth/metadata-default               | 22/0/0 pass | 21/0/0 pass     |
 | auth/metadata-var1                  | 22/0/0 pass | 21/0/0 pass     |
-| auth/metadata-var2                  | 3/6/0 (2)   | 3/6/0 (2)       |
+| auth/metadata-var2                  | 2/6/0 (2)   | 2/6/0 (2)       |
 | auth/metadata-var3                  | 22/0/0 pass | 21/0/0 pass     |
 | auth/basic-cimd                     | 17/0/1 (3)  | 16/0/1 (3)      |
 | auth/scope-from-www-authenticate    | 18/0/0 pass | 17/0/0 pass     |
 | auth/scope-from-scopes-supported    | 18/0/0 pass | 17/0/0 pass     |
 | auth/scope-omitted-when-undefined   | 18/0/0 pass | 17/0/0 pass     |
-| auth/scope-step-up                  | 34/0/1 (4)  | 13/2/1 (4), (5) |
-| auth/scope-retry-limit              | 20/0/0 pass | 13/0/0 pass     |
+| auth/scope-step-up                  | 31/0/1 (4)  | 32/0/2 (4), (5) |
+| auth/scope-retry-limit              | 28/0/0 pass | 29/0/0 pass     |
 | auth/token-endpoint-auth-basic      | 23/0/0 pass | 22/0/0 pass     |
 | auth/token-endpoint-auth-post       | 23/0/0 pass | 22/0/0 pass     |
 | auth/token-endpoint-auth-none       | 23/0/0 pass | 22/0/0 pass     |
 | auth/pre-registration               | 15/0/0 pass | 13/0/0 pass     |
-| auth/resource-mismatch              | -           | 4/0/0 pass      |
+| auth/resource-mismatch              | -           | 3/0/0 pass      |
 | auth/offline-access-scope           | -           | 17/0/0 pass     |
 | auth/offline-access-not-supported   | -           | 17/0/0 pass     |
 | auth/authorization-server-migration | -           | 31/0/0 pass     |
@@ -458,7 +477,7 @@ dash means the requirement set does not list the scenario at that version.
 | http-custom-headers                 | -           | 17/1/0 (7)      |
 | http-invalid-tool-headers           | -           | 12/0/0 pass     |
 | json-schema-ref-no-deref            | -           | 1/0/0 pass      |
-| **Total**                           | 289/6/2     | 438/10/2        |
+| **Total**                           | 293/6/2     | 471/8/3         |
 
 At 2025-11-25, 15 of 18 scenarios pass. At 2026-07-28, 27 of 32 pass; before
 Phase 1b it was 9, with (1) alone accounting for 18 of the 23 others.
@@ -494,13 +513,17 @@ Notes:
    no metadata document. The harness sets none, so Wayfindr registers with DCR.
 4. Warning: an OAuth connector with no credential goes to `needs_auth` without
    sending a request, so Wayfindr never sees the 401 challenge's scope
-   (`mcp:basic`) and asks for the PRM's `scopes_supported` instead. At
-   2025-11-25 the step-up itself passes: the 403 on `tools/list` puts the
-   connector in `needs_auth`, and the second authorization asks for the union.
-5. At 2026-07-28 the 403 `insufficient_scope` comes on `server/discover`.
-   Wayfindr logs the step-up, but the transport then falls back to `initialize`
-   (400 at this version) and to SSE, so the connector ends `unreachable`, not
-   `needs_auth`, and there is no second authorization.
+   (`mcp:basic`) and asks for the PRM's `scopes_supported` instead
+   (wayfindr-311c). The step-up itself passes: the 403 puts the connector in
+   `needs_auth`, and the second authorization asks for the union.
+5. Warning: at 2026-07-28 the 403 `insufficient_scope` comes on
+   `server/discover`. Until wayfindr-n6nc the transport then fell back to
+   `initialize` (400 at this version) and to SSE, so the connector ended
+   `unreachable` and there was no second authorization. Now the step-up ends the
+   connect and the escalation check passes. SEP-2350's union check warns: the
+   second authorization asks for `mcp:profile mcp:write`, the union of what was
+   requested and challenged, but the check wants the 401 challenge's `mcp:basic`
+   in it, which Wayfindr never asked for (note 4).
 6. SEP-2468: the RFC 9207 check accepts `iss` = `<issuer>/` for the issuer
    `<issuer>` and redeems the code; a trailing-slash variant must be refused.
 7. `call_tool` checks arguments against the tool's `inputSchema` and refuses the

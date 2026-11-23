@@ -268,13 +268,13 @@ one `connector state changed` event per connector as it connects.
   and the line is a warning.
 - It exits `1` if startup fails:
 
-| Situation                                     | Message                                                                                                                                                                                                      |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| The config is invalid                         | `load config <path>: invalid config: …`                                                                                                                                                                      |
-| Something else holds the port                 | `127.0.0.1:7777 is in use: daemon already running? …`                                                                                                                                                        |
-| The bound address isn't loopback              | `listen …: bound to …: listen address is not loopback`                                                                                                                                                       |
-| No master key                                 | ``master key: no master key: set WAYFINDR_SECRET_KEY, store one in the OS keychain (service "wayfindr", account "master-key"), or create <data>/master.key with `wayfindr init`: run `wayfindr init` first`` |
-| No client token                               | ``client token: …: run `wayfindr init` first``                                                                                                                                                               |
+| Situation                        | Message                                                                                                                                                                                                      |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The config is invalid            | `load config <path>: invalid config: …`                                                                                                                                                                      |
+| Something else holds the port    | `127.0.0.1:7777 is in use: daemon already running? …`                                                                                                                                                        |
+| The bound address isn't loopback | `listen …: bound to …: listen address is not loopback`                                                                                                                                                       |
+| No master key                    | ``master key: no master key: set WAYFINDR_SECRET_KEY, store one in the OS keychain (service "wayfindr", account "master-key"), or create <data>/master.key with `wayfindr init`: run `wayfindr init` first`` |
+| No client token                  | ``client token: …: run `wayfindr init` first``                                                                                                                                                               |
 
 See [Running the Daemon](../guide/running).
 
@@ -1116,13 +1116,13 @@ Read the MCP servers a client is set up with and add them as connectors, in one
 edit of the config file. Your client's files are only read, never changed.
 `<client>` is one of:
 
-| Client         | Argument         | Files read                                                                                                                                                                                                               |
-| -------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Client         | Argument         | Files read                                                                                                                                                                                                                                         |
+| -------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Claude Code    | `claude-code`    | `~/.claude.json`: `mcpServers` (user scope) and the current directory's entry under `projects` (local scope); `./.mcp.json` (project scope, with `--include-project`). With `CLAUDE_CONFIG_DIR` set, `.claude.json` in that directory comes first. |
-| Claude Desktop | `claude-desktop` | `claude_desktop_config.json` in `~/Library/Application Support/Claude` (macOS), `%APPDATA%\Claude` (Windows), or `~/.config/Claude` (Linux)                                                                              |
-| Cursor         | `cursor`         | `~/.cursor/mcp.json`, and `./.cursor/mcp.json` with `--include-project`                                                                                                                                                                               |
-| Codex          | `codex`          | `[mcp_servers.<name>]` in `$CODEX_HOME/config.toml` (default `~/.codex`), and `./.codex/config.toml` with `--include-project` when that config trusts the project                                                                                 |
-| VS Code        | `vscode`         | The user profile's `mcp.json` (`~/Library/Application Support/Code/User`, `%APPDATA%\Code\User`, or `~/.config/Code/User`), and `./.vscode/mcp.json` with `--include-project`                                                                     |
+| Claude Desktop | `claude-desktop` | `claude_desktop_config.json` in `~/Library/Application Support/Claude` (macOS), `%APPDATA%\Claude` (Windows), or `~/.config/Claude` (Linux)                                                                                                        |
+| Cursor         | `cursor`         | `~/.cursor/mcp.json`, and `./.cursor/mcp.json` with `--include-project`                                                                                                                                                                            |
+| Codex          | `codex`          | `[mcp_servers.<name>]` in `$CODEX_HOME/config.toml` (default `~/.codex`), and `./.codex/config.toml` with `--include-project` when that config trusts the project                                                                                  |
+| VS Code        | `vscode`         | The user profile's `mcp.json` (`~/Library/Application Support/Code/User`, `%APPDATA%\Code\User`, or `~/.config/Code/User`), and `./.vscode/mcp.json` with `--include-project`                                                                      |
 
 ```sh
 wayfindr connector import claude-code --dry-run
@@ -1157,31 +1157,31 @@ run. They are read only with `--include-project`; without it, each one that
 exists is listed as `Not read`. Pass it only in a project you trust, and check
 the commands of `project` entries before you confirm.
 
-| Flag            | Meaning                                                                                 |
-| --------------- | --------------------------------------------------------------------------------------- |
-| `--dry-run`     | Show what would be added and skipped. Ask no server anything, and change nothing.      |
-| `--yes`, `-y`   | Don't ask before adding. Needed when stdin is not a terminal.                           |
-| `--file <path>` | Read this one file, in the client's format, instead of the client's own files.          |
-| `--plain-env K` | Keep the environment variable `K` as plain text instead of a secret. Repeatable.        |
-| `--no-oauth`    | Don't ask HTTP servers whether they use OAuth.                                          |
-| `--no-wait`     | Don't wait for the connectors. Without secrets to store, don't start the daemon either. |
-| `--include-project` | Also read the MCP files in the current directory. Only for a project you trust. |
+| Flag                | Meaning                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------- |
+| `--dry-run`         | Show what would be added and skipped. Ask no server anything, and change nothing.       |
+| `--yes`, `-y`       | Don't ask before adding. Needed when stdin is not a terminal.                           |
+| `--file <path>`     | Read this one file, in the client's format, instead of the client's own files.          |
+| `--plain-env K`     | Keep the environment variable `K` as plain text instead of a secret. Repeatable.        |
+| `--no-oauth`        | Don't ask HTTP servers whether they use OAuth.                                          |
+| `--no-wait`         | Don't wait for the connectors. Without secrets to store, don't start the daemon either. |
+| `--include-project` | Also read the MCP files in the current directory. Only for a project you trust.         |
 
 **Mapping.**
 
-| In the client                                                               | In the connector                                                                                                                                                                                                         |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `command`, `args`, `env`                                                    | `command`, `args`, `env`                                                                                                                                                                                                 |
-| `url`, with `type` `http`, `streamable-http`, or none                       | `url`                                                                                                                                                                                                                    |
-| `url` with `type` `sse`                                                     | `url`, `transport = "sse"`                                                                                                                                                                                               |
-| `headers`; Codex `http_headers`, `env_http_headers`, `bearer_token_env_var` | `headers`                                                                                                                                                                                                                |
-| A literal value in `env` or `headers`                                       | The secret `<connector>_<key>`, referenced as `${secret:…}`                                                                                                                                                              |
-| `${VAR}` in `env` or `headers`, set in the shell you import from            | Its value, stored as a secret like a literal                                                                                                                                                                             |
-| `${VAR}` in `env` or `headers`, not set in that shell                       | `${env:VAR}`, with a note; literal text beside it, except an auth scheme such as `Bearer `, is stored as a secret                                                                                                        |
-| `${VAR}` in `args` or `url`                                                 | `${env:VAR}`, with a note; a `${VAR:-default}` default is dropped                                                                                                                                                        |
-| VS Code `${input:id}` (a `promptString` input)                              | Prompted for once, and stored as a secret                                                                                                                                                                                |
-| `oauth` / `auth` client ID and scopes                                       | `[connectors.<name>.auth]` with `type = "oauth"`, `client_id`, `scopes`                                                                                                                                                  |
-| Claude Code `timeout`, Codex `tool_timeout_sec`                             | `timeout`                                                                                                                                                                                                                |
+| In the client                                                               | In the connector                                                                                                                                                                                                                          |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `command`, `args`, `env`                                                    | `command`, `args`, `env`                                                                                                                                                                                                                  |
+| `url`, with `type` `http`, `streamable-http`, or none                       | `url`                                                                                                                                                                                                                                     |
+| `url` with `type` `sse`                                                     | `url`, `transport = "sse"`                                                                                                                                                                                                                |
+| `headers`; Codex `http_headers`, `env_http_headers`, `bearer_token_env_var` | `headers`                                                                                                                                                                                                                                 |
+| A literal value in `env` or `headers`                                       | The secret `<connector>_<key>`, referenced as `${secret:…}`                                                                                                                                                                               |
+| `${VAR}` in `env` or `headers`, set in the shell you import from            | Its value, stored as a secret like a literal                                                                                                                                                                                              |
+| `${VAR}` in `env` or `headers`, not set in that shell                       | `${env:VAR}`, with a note; literal text beside it, except an auth scheme such as `Bearer `, is stored as a secret                                                                                                                         |
+| `${VAR}` in `args` or `url`                                                 | `${env:VAR}`, with a note; a `${VAR:-default}` default is dropped                                                                                                                                                                         |
+| VS Code `${input:id}` (a `promptString` input)                              | Prompted for once, and stored as a secret                                                                                                                                                                                                 |
+| `oauth` / `auth` client ID and scopes                                       | `[connectors.<name>.auth]` with `type = "oauth"`, `client_id`, `scopes`                                                                                                                                                                   |
+| Claude Code `timeout`, Codex `tool_timeout_sec`                             | `timeout`                                                                                                                                                                                                                                 |
 | A `url` with no headers or auth                                             | [OAuth detection](#wayfindr-connector-add) once you confirm, as `connector add` does; when the answer is unclear, the connector is added without OAuth, with a line saying to add `auth = { type = "oauth" }` to its table if it needs it |
 
 A client reads `${VAR}` from the shell it runs in, but `${env:VAR}` reads the
@@ -1234,13 +1234,13 @@ nothing is written for it:
 **Exit:** `0` once the file is written, or when there is nothing to import or
 you answer no. `1` when:
 
-| Situation                              | Message                                                                                      |
-| -------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Unknown client                         | `unknown client "emacs": want one of claude-code, claude-desktop, cursor, codex, vscode`     |
+| Situation                                                            | Message                                                                                      |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Unknown client                                                       | `unknown client "emacs": want one of claude-code, claude-desktop, cursor, codex, vscode`     |
 | The client has no config files (not even a project file left unread) | `found no cursor config here or in your home directory; --file reads one file in its format` |
-| A client file doesn't parse            | `parse <path>: …`                                                                            |
-| Stdin is not a terminal and no `--yes` | `not a terminal, so nothing was asked or changed: pass --yes to add them`                    |
-| Two VS Code inputs with stdin piped    | `more than one input can't be piped: run this on a terminal`                                 |
+| A client file doesn't parse                                          | `parse <path>: …`                                                                            |
+| Stdin is not a terminal and no `--yes`                               | `not a terminal, so nothing was asked or changed: pass --yes to add them`                    |
+| Two VS Code inputs with stdin piped                                  | `more than one input can't be piped: run this on a terminal`                                 |
 
 The no-config, unsafe-edit, changed-file, and rejected-config cases are the
 [shared ones](#what-add-edit-and-import-do).
@@ -1594,7 +1594,9 @@ daemon isn't running.
 
 Manage scoped client tokens: client tokens that can use only the connectors you
 name, and not the admin API. Give one to a client that runs unattended. See
-[Scoped client tokens](../guide/access/scoped-tokens).
+[Scoped client tokens](../guide/access/scoped-tokens). With `--remote`, a token
+can also reach `/mcp` through a tunnel, for a
+[cloud agent](../guide/cloud-agents).
 
 - [`wayfindr token create`](#wayfindr-token-create): create one and print it once.
 - [`wayfindr token list`](#wayfindr-token-list): list them, never their values.
@@ -1612,11 +1614,20 @@ wf_s_6kq1…
 This is the only time it is shown; store it where the client can read it.
 
 $ wayfindr token list
-NAME            CONNECTORS      CREATED               LAST USED
-nightly-triage  github, linear  2026-11-08T10:00:00Z  2026-11-08T22:00:04Z
+NAME            CONNECTORS      REMOTE  CREATED               LAST USED
+nightly-triage  github, linear  no      2026-11-08T10:00:00Z  2026-11-08T22:00:04Z
 
 $ wayfindr token revoke nightly-triage
 Revoked client token nightly-triage. Clients using it are refused from now on.
+```
+
+A token for a cloud agent is made the same way, with `--remote`:
+
+```text
+$ wayfindr token create grok-bot --connector github --remote
+Created remote client token grok-bot. It can use: github.
+wf_s_9d2f…
+This is the only time it is shown; store it where the client can read it.
 ```
 
 ### `wayfindr token create`
@@ -1628,11 +1639,12 @@ wayfindr token create <name> --connector <connector>... [flags]
 Create a scoped client token and print its value once. Takes exactly one
 argument, the token's name.
 
-| Flag                      | Default | Description                                                                     |
-| ------------------------- | ------- | ------------------------------------------------------------------------------- |
-| `--connector <connector>` | none    | A connector the token can use. Repeat it for several. At least one is required. |
+| Flag                      | Default | Description                                                                                                                                  |
+| ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--connector <connector>` | none    | A connector the token can use. Repeat it for several. At least one is required.                                                              |
+| `--remote`                | `false` | Let the token reach `/mcp` through a tunnel, which no other token can. It can't be changed later. See [Cloud agents](../guide/cloud-agents). |
 
-**Prints** `Created client token <name>. It can use: <connectors>.`, then the
+**Prints** `Created client token <name>. It can use: <connectors>.` (`Created remote client token …` with `--remote`), then the
 token on a line of its own, then
 `This is the only time it is shown; store it where the client can read it.` The
 value is `wf_s_` followed by 32 random bytes in base64url. Store it where the
@@ -1645,7 +1657,12 @@ again.
 - Each `--connector` must name a connector in the daemon's running config. If
   you remove that connector later, the token simply stops matching it. Adding it
   back under the same name restores access.
-- A token's connectors can't be changed. Revoke it and create a new one.
+- A token's connectors and its `--remote` setting can't be changed. Revoke it
+  and create a new one.
+- A remote token still reaches only its connectors and never the admin API, and
+  it works locally like any scoped token. The default client token is never
+  remote. Give a remote token only the connectors its agent needs: anyone who
+  holds it can use them from anywhere until you revoke it.
 - Tokens don't expire.
 
 **Exit:** `0` once created. `1` when no `--connector` is given
@@ -1663,6 +1680,8 @@ The columns are:
 
 - **CONNECTORS** are the connectors the token can use, as created. A connector
   removed from the config since is still listed.
+- **REMOTE** is `yes` for a token created with `--remote`, `no` otherwise. Only
+  a `yes` token gets through a tunnel.
 - **LAST USED** is when a client last presented the token, or `-` if none has.
   The daemon writes it to the store at most once a minute, and when it stops, so
   it can lag by up to a minute.
@@ -1676,6 +1695,7 @@ With no scoped tokens it prints
 | ----------------------- | ---------------------------------------------------------------------- |
 | `tokens[].name`         | The token's name.                                                      |
 | `tokens[].connectors`   | The connectors it can use, as created.                                 |
+| `tokens[].remote`       | `true` if it was created with `--remote`, else `false`.                |
 | `tokens[].created_at`   | When it was created.                                                   |
 | `tokens[].last_used_at` | When a client last presented it. Absent until the token is first used. |
 
@@ -1687,8 +1707,9 @@ Delete a scoped client token, by name.
 
 **Prints**
 `Revoked client token <name>. Clients using it are refused from now on.` From
-their next request on, clients that present it get `401`, with no restart. Calls
-already logged keep its name in the call log.
+their next request on, clients that present it get `401`, with no restart (`404`
+for a request that comes through a tunnel). Calls already logged keep its name in
+the call log.
 
 **Exit:** `0` once deleted. `1` when no scoped token has that name: the daemon's
 sentence.

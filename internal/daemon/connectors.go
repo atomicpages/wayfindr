@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -27,13 +26,15 @@ import (
 // probeTimeout bounds the OAuth probe of a new URL connector, as the CLI's.
 const probeTimeout = 10 * time.Second
 
-// connectorAdder adds a connector to the daemon's own config file for the
-// admin API's POST /admin/connectors (ADR 0017, design §7.8). It does what
+// configWriter is the daemon's one writer of its own config file: it adds a
+// connector for the admin API's POST /admin/connectors (ADR 0017, design
+// §7.8) and sets server.public_url for PUT /admin/server/public-url
+// (setPublicURL), so the two share its lock. An add does what
 // `wayfindr connector add` does, in the daemon: append the table with
 // config.AppendConnector, probe for OAuth, store the secrets, write the
 // file with newfile.Replace, and then reload it at once rather than wait
-// for the watcher. One add runs at a time.
-type connectorAdder struct {
+// for the watcher. One write runs at a time.
+type configWriter struct {
 	// file is the config file the daemon loaded, and opts its load options.
 	file string
 	opts config.Options
@@ -44,6 +45,9 @@ type connectorAdder struct {
 	// reload reloads the config file (Daemon.reloadFile). The daemon is
 	// built after the admin API, so New sets it last.
 	reload func(ctx context.Context)
+	// config is the running config's admin state, which setPublicURL reads
+	// to see that its reload applied.
+	config func() admin.ConfigState
 	status func() []upstream.ConnectorStatus
 	// awaitSync waits for a ready connector's first sync.
 	awaitSync func(ctx context.Context, connector string)
@@ -53,7 +57,7 @@ type connectorAdder struct {
 }
 
 // add serves admin.Options.AddConnector.
-func (a *connectorAdder) add(ctx context.Context, spec admin.ConnectorSpec) (admin.ConnectorReport, error) {
+func (a *configWriter) add(ctx context.Context, spec admin.ConnectorSpec) (admin.ConnectorReport, error) {
 	c, secrets, err := newConnector(spec)
 
 	if err != nil {
@@ -115,7 +119,7 @@ func (a *connectorAdder) add(ctx context.Context, spec admin.ConnectorSpec) (adm
 
 	if err := newfile.Replace(a.file, src, next, a.file); err != nil {
 		if errors.Is(err, newfile.ErrChanged) {
-			return admin.ConnectorReport{}, &admin.AddError{Status: http.StatusConflict, Kind: string(config.KindConflict), Case: "config_changed",
+			return admin.ConnectorReport{}, &admin.ConfigError{Kind: admin.ConfigKindConflict, Case: admin.ConfigCaseConfigChanged,
 				Advice: admin.Advice{Summary: "The config file changed while " + spec.Name + " was being added. Try again." + kept(rep.Secrets)}}
 		}
 
@@ -142,7 +146,7 @@ func (a *connectorAdder) add(ctx context.Context, spec admin.ConnectorSpec) (adm
 }
 
 // statusOf is connector's current status, or fallback when it is gone.
-func (a *connectorAdder) statusOf(connector string, fallback upstream.ConnectorStatus) upstream.ConnectorStatus {
+func (a *configWriter) statusOf(connector string, fallback upstream.ConnectorStatus) upstream.ConnectorStatus {
 	for _, s := range a.status() {
 		if s.Connector == connector {
 			return s
@@ -156,7 +160,7 @@ func (a *connectorAdder) statusOf(connector string, fallback upstream.ConnectorS
 // credentials, whether it uses OAuth, as `wayfindr connector add` does,
 // through the HTTP client its tls table makes. It returns the auth table
 // to write (nil for none) and how the probe went.
-func (a *connectorAdder) probe(ctx context.Context, c config.NewConnector) (*config.NewAuth, string) {
+func (a *configWriter) probe(ctx context.Context, c config.NewConnector) (*config.NewAuth, string) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	client, err := httpclient.For(ctx, config.Connector{Name: c.Name, URL: c.URL, TLS: c.TLS}, a.resolver)
@@ -340,12 +344,12 @@ func merge(kind string, plain, secret map[string]string, addSecret func(key, val
 
 // invalid is a 400 refusal with msg.
 func invalid(msg string) error {
-	return &admin.AddError{Status: http.StatusBadRequest, Kind: string(config.KindInvalid), Case: "invalid_spec", Advice: admin.Advice{Summary: msg}}
+	return &admin.ConfigError{Kind: admin.ConfigKindInvalid, Case: admin.ConfigCaseInvalidSpec, Advice: admin.Advice{Summary: msg}}
 }
 
 // appendError words a refused AppendConnector for the console: the config's
 // own validation issues, or the editor's Kind and Case. config.Advise is
-// worded for the CLI, so only its summary is kept here.
+// worded for the CLI, so the console uses config.Reason instead.
 func appendError(name string, err error) error {
 	if ve := (*config.ValidationError)(nil); errors.As(err, &ve) {
 		var issues []string
@@ -355,7 +359,7 @@ func appendError(name string, err error) error {
 			issues = append(issues, path+": "+is.Message)
 		}
 
-		return &admin.AddError{Status: http.StatusBadRequest, Kind: string(config.KindInvalid), Case: "invalid_connector",
+		return &admin.ConfigError{Kind: admin.ConfigKindInvalid, Case: admin.ConfigCaseInvalidConnector,
 			Advice: admin.Advice{Summary: "The connector is not valid: " + strings.Join(issues, "; ") + "."}}
 	}
 
@@ -365,21 +369,19 @@ func appendError(name string, err error) error {
 		return err
 	}
 
-	ae := &admin.AddError{Status: http.StatusConflict, Kind: string(ce.Kind), Case: string(ce.Case)}
+	ae := &admin.ConfigError{Kind: configKind(ce.Kind), Case: configCase(ce.Case)}
 
 	switch ce.Kind {
 	case config.KindConflict:
 		if ce.Case == config.CaseConnectorExists {
 			ae.Advice.Summary = fmt.Sprintf("A connector named %q is already configured. Pick another name.", name)
 		} else {
-			ae.Advice.Summary = sentence(config.Advise(ce).Summary)
+			ae.Advice.Summary = sentence(config.Reason(ce))
 		}
 	case config.KindUnsafe:
-		ae.Advice.Summary = "The config file can't be changed safely: " + strings.TrimPrefix(config.Advise(ce).Summary, "could not change it safely: ") +
-			". Add the connector to the file by hand."
+		ae.Advice.Summary = "The config file can't be changed safely: " + config.Reason(ce) + ". Add the connector to the file by hand."
 	case config.KindInvalid:
-		ae.Status = http.StatusBadRequest
-		ae.Advice.Summary = sentence(config.Advise(ce).Summary)
+		ae.Advice.Summary = sentence(config.Reason(ce))
 	}
 
 	return ae

@@ -61,7 +61,10 @@ export default defineConfig({
         },
         {
           text: "Connect Clients",
-          items: [{ text: "Clients", link: "/guide/clients" }],
+          items: [
+            { text: "Clients", link: "/guide/clients" },
+            { text: "Cloud Agents", link: "/guide/cloud-agents" },
+          ],
         },
         {
           text: "Connectors",
