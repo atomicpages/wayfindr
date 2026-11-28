@@ -23,9 +23,13 @@ const protocolInputRequired = "2026-07-28"
 // requestState is what the requestState of a call_tool input_required
 // result holds, sealed with the master key so the client can neither read
 // nor forge it (GLOSSARY: Request state). It binds the answer to the call
-// that asked: the user (in the sealing's AAD), the tool, the arguments,
-// and an expiry.
+// that asked: the user (in the sealing's AAD), the client token instance,
+// the tool, the arguments, and an expiry.
 type requestState struct {
+	// Token is the Instance of the client token the call came with, so an
+	// answer is taken only from a call made with the same token, and not
+	// from a later token given the name of a revoked one.
+	Token     string `json:"token"`
 	Connector string `json:"connector"`
 	Tool      string `json:"tool"`
 	// Args is argsDigest of the call's arguments.
@@ -42,9 +46,11 @@ func (g *Gateway) stateAAD() []byte {
 }
 
 // sealState seals a request state for the call of tool on connector with
-// args, carrying the upstream's state.
-func (g *Gateway) sealState(connector, tool string, args json.RawMessage, upstreamState string) string {
+// args, made with the client token instance token, carrying the
+// upstream's state.
+func (g *Gateway) sealState(token, connector, tool string, args json.RawMessage, upstreamState string) string {
 	plain, _ := json.Marshal(requestState{ // a struct of strings and an int always marshals
+		Token:     token,
 		Connector: connector,
 		Tool:      tool,
 		Args:      argsDigest(args),
@@ -57,11 +63,12 @@ func (g *Gateway) sealState(connector, tool string, args json.RawMessage, upstre
 
 // openState opens a request state the client sent back, and reports
 // whether it is one this gateway sealed for this user, for the call of
-// tool on connector with args, and not expired.
-func (g *Gateway) openState(state, connector, tool string, args json.RawMessage) (requestState, bool) {
+// tool on connector with args made with the client token instance token,
+// and not expired.
+func (g *Gateway) openState(state, token, connector, tool string, args json.RawMessage) (requestState, bool) {
 	st, ok := g.unseal(state)
 
-	return st, ok && st.Connector == connector && st.Tool == tool && st.Args == argsDigest(args) &&
+	return st, ok && st.sealedFor(token) && st.Connector == connector && st.Tool == tool && st.Args == argsDigest(args) &&
 		g.now().Unix() < st.Expires
 }
 
@@ -81,12 +88,22 @@ func (g *Gateway) unseal(state string) (requestState, bool) {
 }
 
 // discardState gives up on the question a request state answers, when the
-// answer is refused: the upstream is told cancel rather than waiting for
-// it until the state expires. A state this gateway didn't seal is ignored.
-func (g *Gateway) discardState(state string) {
-	if st, ok := g.unseal(state); ok {
+// answer, sent with the client token instance token, is refused: the
+// upstream is told cancel rather than waiting for it until the state
+// expires. A state this gateway didn't seal is ignored, and so is one
+// sealed for another token, so a client holding another's state can't
+// cancel that client's question; it waits for its answer or its expiry.
+func (g *Gateway) discardState(state, token string) {
+	if st, ok := g.unseal(state); ok && st.sealedFor(token) {
 		g.upstreams.Discard(st.Upstream)
 	}
+}
+
+// sealedFor reports whether st was sealed for the client token instance
+// token. An empty token is no instance, so it matches nothing, not even a
+// state sealed before states carried a token.
+func (st requestState) sealedFor(token string) bool {
+	return token != "" && st.Token == token
 }
 
 // argsDigest is a digest of a call's arguments that doesn't depend on how
@@ -110,10 +127,10 @@ func argsDigest(args json.RawMessage) string {
 }
 
 // ask puts res's input requests to the client: each request's id and
-// message say which connector asks, and a sealed requestState replaces the
-// upstream's. A client that can't answer gets an error, and the upstream's
-// question is discarded.
-func (g *Gateway) ask(req *mcp.CallToolRequest, connector, tool string, args json.RawMessage, res *mcp.CallToolResult) (*mcp.CallToolResult, error) {
+// message say which connector asks, and a requestState sealed for the
+// client token instance token replaces the upstream's. A client that can't answer gets an error, and
+// the upstream's question is discarded.
+func (g *Gateway) ask(a Asker, token, connector, tool string, args json.RawMessage, res *mcp.CallToolResult) (*mcp.CallToolResult, error) {
 	name := connector + "." + tool
 	reqs := make(mcp.InputRequestMap, len(res.InputRequests))
 
@@ -132,13 +149,13 @@ func (g *Gateway) ask(req *mcp.CallToolRequest, connector, tool string, args jso
 		reqs[connector+"-"+id] = &cp
 	}
 
-	if v := req.ProtocolVersion(); v < protocolInputRequired {
+	if v := a.ProtocolVersion; v < protocolInputRequired {
 		g.upstreams.Discard(res.RequestState)
 
 		return nil, &Error{Kind: KindCannotAsk, Case: CaseClientTooOld, Tool: name, Connector: connector, Detail: v}
 	}
 
-	if !canElicit(req.ClientCapabilities(), reqs) {
+	if !canElicit(a.Capabilities, reqs) {
 		g.upstreams.Discard(res.RequestState)
 
 		return nil, &Error{Kind: KindCannotAsk, Case: CaseNoElicitation, Tool: name, Connector: connector}
@@ -146,7 +163,7 @@ func (g *Gateway) ask(req *mcp.CallToolRequest, connector, tool string, args jso
 
 	return &mcp.CallToolResult{
 		InputRequests: reqs,
-		RequestState:  g.sealState(connector, tool, args, res.RequestState),
+		RequestState:  g.sealState(token, connector, tool, args, res.RequestState),
 	}, nil
 }
 

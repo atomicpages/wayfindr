@@ -122,8 +122,10 @@ wayfindr stdio`), else the entry to add to the harness's config file. All
   in flight, since nothing in the request names the call.
 - **Request state** — the opaque `requestState` of a `call_tool`
   `input_required` result. The gateway seals it with the master key and binds
-  it to the user, the tool, its arguments, and a 10-minute expiry, so an
-  answer is applied only to the call that asked.
+  it to the user, the client token the call came with (that instance of it: a
+  token created again under a revoked one's name is another), the tool, its
+  arguments, and a 10-minute expiry, so an answer is applied only to the call
+  that asked.
 
 ## Catalog and search
 

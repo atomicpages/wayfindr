@@ -442,6 +442,23 @@ func TestBadProfileIsRefused(t *testing.T) {
 	}
 }
 
+// TestBadNameBeatsBadProfile: call_tool parses the name before it narrows
+// the request, so a call with a bad name and a bad profile header is
+// refused for its name.
+func TestBadNameBeatsBadProfile(t *testing.T) {
+	rec := &recorder{}
+	e := newEnvWith(t, envOptions{
+		fakes: map[string][]fakeupstream.Option{"gmail": {gmailTools()}},
+		gateway: gateway.Options{Calls: rec, Profile: profiles(map[string]*config.Scope{
+			"acme": {}, "beta": {},
+		})},
+	})
+	cs := connectHeaders(t, e.url, fakeupstream.V20251125, http.Header{config.ProfileHeader: {"acme", "beta"}})
+
+	wantRefused(t, cs, rec, "", "invalid_name", "missing_name")
+	wantRefused(t, cs, rec, "get_thread", "invalid_name", "unqualified")
+}
+
 // TestProfileIsResolvedPerRequest: the gateway asks for the profile on
 // every request, so a reload that changes it applies to a connected client
 // at once.

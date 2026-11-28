@@ -98,7 +98,8 @@ func (g *Gateway) narrowingOf(req *mcp.CallToolRequest, client clienttoken.Clien
 	return n, nil
 }
 
-// errNoClient is narrowingOf's refusal of a request that carries no Client.
+// errNoClient is narrowingOf's refusal of a request that carries no Client,
+// and callCore's of a call whose options have no Narrow.
 func errNoClient() error {
 	return &Error{Kind: KindInternal, Case: CaseNoClient, Err: errors.New("request carries no client token info")}
 }

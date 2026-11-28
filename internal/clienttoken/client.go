@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 )
@@ -37,6 +39,25 @@ type Client struct {
 	// Scoped, whatever this says: httpd decides with Remote only after
 	// Registry.Lookup, whose hits are all scoped.
 	Remote bool
+	// Created is when the scoped token or OAuth grant was created; zero for
+	// the default token. A name is freed when its token is revoked, so with
+	// Name it tells a token apart from a later one of the same name
+	// (Instance).
+	Created time.Time
+}
+
+// Instance identifies c's token among every token that has had its name:
+// the name, plus for a scoped token or grant when it was created, to the
+// millisecond as the store keeps it. A token re-created under a revoked
+// one's name is another instance. The default token's is its name, as it is
+// never revoked. Names never contain "@", so the two forms can't collide.
+// Empty for the zero Client.
+func (c Client) Instance() string {
+	if c.Created.IsZero() {
+		return c.Name
+	}
+
+	return c.Name + "@" + strconv.FormatInt(c.Created.UnixMilli(), 10)
 }
 
 // Default is the Client of the default client token.

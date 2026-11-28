@@ -178,5 +178,5 @@ func (r *Registry) drop(name string, d [sha256.Size]byte) {
 }
 
 func clone(c Client) Client {
-	return Client{Name: c.Name, Connectors: slices.Clone(c.Connectors), Remote: c.Remote}
+	return Client{Name: c.Name, Connectors: slices.Clone(c.Connectors), Remote: c.Remote, Created: c.Created}
 }

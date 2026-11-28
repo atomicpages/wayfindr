@@ -25,20 +25,92 @@ type callArgs struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
-// callTool is the call_tool handler: it runs the call and records it in
-// the call log, once, whichever way it ended. The Client is read once, for
-// both: call narrows by it, and the log names its token. A request with no
-// Client is logged with no token name; call refuses it.
+// CallRequest is one call_tool call, whichever door it came through.
+type CallRequest struct {
+	// Name is the qualified name, as the caller wrote it.
+	Name string
+	// Args are the tool's arguments: an object, or nil (or JSON null) for
+	// none.
+	Args json.RawMessage
+	// Resume is set when the caller answers an earlier input_required.
+	Resume *Resume
+}
+
+// Resume is a caller's answer to an input_required result: the sealed
+// request state it carried, and the caller's responses to its requests.
+type Resume struct {
+	State     string
+	Responses mcp.InputResponseMap
+}
+
+// CallOptions is who is calling and how they can be asked. It is built
+// per call, by value, and never mutated.
+type CallOptions struct {
+	// Client is the client token the call came with: it narrows the call
+	// (through Narrow), the call log names it, and a request state is
+	// sealed for its Instance and opened only by it.
+	Client clienttoken.Client
+	// ClientName is the caller's clientInfo name, for the call log, which
+	// clips it.
+	ClientName string
+	// Narrow builds the call's narrowing, and is required: callCore refuses
+	// a call without it, as it would one with no Client (CaseNoClient).
+	// callCore calls it after the name is parsed, so a call with a bad name
+	// and a bad profile header is refused for its name.
+	Narrow func() (config.Narrowing, error)
+	// Asker is what ask needs to know about the caller.
+	Asker Asker
+}
+
+// Asker is what ask needs to know about the caller to put an upstream's
+// question to it.
+type Asker struct {
+	// ProtocolVersion is the MCP version the caller speaks.
+	ProtocolVersion string
+	// Capabilities are the caller's; nil when it declared none.
+	Capabilities *mcp.ClientCapabilities
+}
+
+// callTool is the call_tool handler: it maps the request onto callCore and
+// returns callCore's result. The Client is read once, for both the
+// narrowing and the call log. A request with no Client is logged with no
+// token name; Narrow refuses it.
 func (g *Gateway) callTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	started := time.Now()
+	var a callArgs
+
+	if len(req.Params.Arguments) > 0 {
+		// A malformed object leaves name unset, which callCore reports.
+		_ = json.Unmarshal(req.Params.Arguments, &a)
+	}
+
+	name, _ := a.Name.(string)
+	r := CallRequest{Name: name, Args: a.Arguments}
+
+	if p := req.Params; p.RequestState != "" || p.InputResponses != nil {
+		r.Resume = &Resume{State: p.RequestState, Responses: p.InputResponses}
+	}
+
 	client, authed := clientOf(req)
-	res, o := g.call(ctx, req, client, authed)
+
+	return g.callCore(ctx, r, CallOptions{
+		Client:     client,
+		ClientName: clientName(req),
+		Narrow:     func() (config.Narrowing, error) { return g.narrowingOf(req, client, authed) },
+		Asker:      Asker{ProtocolVersion: req.ProtocolVersion(), Capabilities: req.ClientCapabilities()},
+	}), nil
+}
+
+// callCore is the call path every door shares (design §7.6): it runs the
+// call and records it in the call log, once, whichever way it ended.
+func (g *Gateway) callCore(ctx context.Context, r CallRequest, opts CallOptions) *mcp.CallToolResult {
+	started := time.Now()
+	res, o := g.call(ctx, r, opts)
 
 	if g.calls != nil {
 		g.calls.Record(store.Call{
 			UserID:    g.userID,
-			Client:    clientName(req),
-			TokenName: client.Name,
+			Client:    clip(opts.ClientName),
+			TokenName: opts.Client.Name,
 			Connector: clip(o.connector),
 			Tool:      clip(o.tool),
 			StartedAt: started,
@@ -50,7 +122,7 @@ func (g *Gateway) callTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 		})
 	}
 
-	return res, nil
+	return res
 }
 
 // outcome is how a call ended, for the call log.
@@ -73,32 +145,26 @@ type outcome struct {
 // it is configured, look the tool up in the catalog, check the connector's
 // tool policy and the request's profile and project scope, validate the
 // arguments against the tool's inputSchema, then call the upstream and
-// return its result unchanged, isError results included. client and authed
-// are clientOf(req).
-func (g *Gateway) call(ctx context.Context, req *mcp.CallToolRequest, client clienttoken.Client, authed bool) (*mcp.CallToolResult, outcome) {
+// return its result unchanged, isError results included.
+func (g *Gateway) call(ctx context.Context, r CallRequest, opts CallOptions) (*mcp.CallToolResult, outcome) {
 	var (
-		a callArgs
 		o outcome
 		// continued is set once an answer is handed to the upstream. An
 		// answer refused before that discards the question it answers,
-		// which would otherwise hold its upstream call until it expired.
+		// which would otherwise hold its upstream call until it expired,
+		// when it comes with the client token the question was put to.
 		continued bool
 	)
 
-	if state := req.Params.RequestState; state != "" {
+	if p := r.Resume; p != nil {
 		defer func() {
 			if !continued {
-				g.discardState(state)
+				g.discardState(p.State, opts.Client.Instance())
 			}
 		}()
 	}
 
-	if len(req.Params.Arguments) > 0 {
-		// A malformed object leaves name unset, which is reported below.
-		_ = json.Unmarshal(req.Params.Arguments, &a)
-	}
-
-	name, _ := a.Name.(string)
+	name := r.Name
 
 	if strings.TrimSpace(name) == "" {
 		return g.fail(o, &Error{Kind: KindInvalidName, Case: CaseMissingName})
@@ -118,7 +184,11 @@ func (g *Gateway) call(ctx context.Context, req *mcp.CallToolRequest, client cli
 		return g.fail(o, &Error{Kind: KindInvalidName, Case: CaseUnqualified, Tool: name})
 	}
 
-	scope, err := g.narrowingOf(req, client, authed)
+	if opts.Narrow == nil {
+		return g.fail(o, errNoClient())
+	}
+
+	scope, err := opts.Narrow()
 
 	if err != nil {
 		return g.fail(o, err)
@@ -155,7 +225,7 @@ func (g *Gateway) call(ctx context.Context, req *mcp.CallToolRequest, client cli
 		return g.fail(o, hiddenError(scope, c, name, connector))
 	}
 
-	args := a.Arguments
+	args := r.Args
 
 	if isNull(args) {
 		args = nil
@@ -169,9 +239,9 @@ func (g *Gateway) call(ctx context.Context, req *mcp.CallToolRequest, client cli
 
 	upstreamStarted := time.Now()
 
-	if p := req.Params; p.RequestState != "" || p.InputResponses != nil {
+	if p := r.Resume; p != nil {
 		// The client answers what an earlier call asked.
-		st, ok := g.openState(p.RequestState, connector, tool, args)
+		st, ok := g.openState(p.State, opts.Client.Instance(), connector, tool, args)
 
 		if !ok {
 			return g.fail(o, &Error{Kind: KindInvalidRequestState, Tool: name, Connector: connector})
@@ -179,7 +249,7 @@ func (g *Gateway) call(ctx context.Context, req *mcp.CallToolRequest, client cli
 
 		continued = true
 		res, err = g.upstreams.Continue(ctx, connector, tool, args,
-			upstream.Input{State: st.Upstream, Responses: unprefix(connector, p.InputResponses)})
+			upstream.Input{State: st.Upstream, Responses: unprefix(connector, p.Responses)})
 	} else {
 		res, err = g.upstreams.Call(ctx, connector, tool, args)
 	}
@@ -192,7 +262,7 @@ func (g *Gateway) call(ctx context.Context, req *mcp.CallToolRequest, client cli
 	}
 
 	if res.InputRequests != nil {
-		asked, err := g.ask(req, connector, tool, args, res)
+		asked, err := g.ask(opts.Asker, opts.Client.Instance(), connector, tool, args, res)
 
 		if err != nil {
 			return g.fail(o, err)
@@ -300,12 +370,12 @@ func clientOf(req *mcp.CallToolRequest) (clienttoken.Client, bool) {
 	return clienttoken.FromTokenInfo(req.Extra.TokenInfo)
 }
 
-// clientName is the calling client's clientInfo name, clipped; empty when
-// the request carries none, as a 2025 request to a stateless server
+// clientName is the calling client's clientInfo name, unclipped; empty
+// when the request carries none, as a 2025 request to a stateless server
 // doesn't.
 func clientName(req *mcp.CallToolRequest) string {
 	if info := req.ClientInfo(); info != nil {
-		return clip(info.Name)
+		return info.Name
 	}
 
 	return ""

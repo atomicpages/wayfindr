@@ -98,9 +98,11 @@ func loadClientTokens(ctx context.Context, st store.Store, userID string, now fu
 }
 
 // registryClient is what the registry keeps of a stored token: everything
-// httpd needs to resolve its bearer, and nothing of its digest or timestamps.
+// httpd needs to resolve its bearer, and its creation time, which tells it
+// apart from a later token of the same name; nothing of its digest or its
+// use.
 func registryClient(t store.ClientToken) clienttoken.Client {
-	return clienttoken.Client{Name: t.Name, Connectors: t.Connectors, Remote: t.Remote}
+	return clienttoken.Client{Name: t.Name, Connectors: t.Connectors, Remote: t.Remote, Created: t.CreatedAt}
 }
 
 // Create implements admin.ClientTokens: it generates the value, stores its
@@ -306,9 +308,10 @@ func (t *clientTokens) accept(g store.OAuthGrant, access store.OAuthToken) {
 
 // grantClient is what httpd needs to resolve a grant's access token: a remote
 // scoped client, so it reaches /mcp through the tunnel and nothing of
-// /admin.
+// /admin. It carries the grant's creation time, not the access token's,
+// which rotates, so every access token of one grant is one instance.
 func grantClient(g store.OAuthGrant) clienttoken.Client {
-	return clienttoken.Client{Name: g.Name, Connectors: slices.Clone(g.Connectors), Remote: true}
+	return clienttoken.Client{Name: g.Name, Connectors: slices.Clone(g.Connectors), Remote: true, Created: g.CreatedAt}
 }
 
 // suspended reports whether g is suspended: OAuth is off, its resource is not

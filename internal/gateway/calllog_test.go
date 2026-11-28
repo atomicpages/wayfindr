@@ -1,6 +1,7 @@
 package gateway_test
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -10,8 +11,10 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/atomicpages/wayfindr/internal/clienttoken"
+	"github.com/atomicpages/wayfindr/internal/config"
 	"github.com/atomicpages/wayfindr/internal/gateway"
 	"github.com/atomicpages/wayfindr/internal/store"
 	"github.com/atomicpages/wayfindr/internal/testutil/fakeupstream"
@@ -226,5 +229,118 @@ func TestOnSearchFiresOncePerSearchTools(t *testing.T) {
 
 	if got := searches.Load(); got != 2 {
 		t.Errorf("OnSearch fired %d times, want 2", got)
+	}
+}
+
+// TestCallCoreServesAnyDoorAsCallToolDoes: callCore, given the options
+// call_tool would build, returns what call_tool returns and records the
+// same call-log row, but for the client and token names it was given.
+// It drives callCore through export_test.go's CallCore, a deliberate seam
+// exception the call-core plan asked for, until `wayfindr call` is the
+// second door.
+func TestCallCoreServesAnyDoorAsCallToolDoes(t *testing.T) {
+	rec := &recorder{}
+	e := newEnvWith(t, envOptions{
+		fakes: map[string][]fakeupstream.Option{
+			"linear": {fakeupstream.WithTools(createIssue()), fakeupstream.WithFailingTool()},
+		},
+		gateway: gateway.Options{Calls: rec},
+	})
+	cs := connect(t, e.url, fakeupstream.V20260728)
+	opts := gateway.CallOptions{
+		Client:     clienttoken.Client{Name: "admin"},
+		ClientName: "wayfindr-cli",
+		Narrow:     func() (config.Narrowing, error) { return config.Narrowing{}, nil },
+		Asker:      gateway.Asker{ProtocolVersion: fakeupstream.V20260728},
+	}
+
+	tests := []struct {
+		name string
+		args map[string]any
+	}{
+		{"ok", map[string]any{"name": "linear.create_issue", "arguments": map[string]any{"title": "x"}}},
+		{"tool error", map[string]any{"name": "linear." + fakeupstream.ToolFail}},
+		{"rejected", map[string]any{"name": "linear.nope"}},
+		{"invalid arguments", map[string]any{"name": "linear.create_issue", "arguments": map[string]any{}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec.take()
+			viaMCP := call(t, cs, "call_tool", tt.args)
+			fromMCP := rec.take()
+
+			name, _ := tt.args["name"].(string)
+			var args json.RawMessage
+
+			if a, ok := tt.args["arguments"]; ok {
+				args, _ = json.Marshal(a)
+			}
+
+			viaCore := e.gateway.CallCore(t.Context(), gateway.CallRequest{Name: name, Args: args}, opts)
+			fromCore := rec.take()
+
+			if diff := cmp.Diff(asJSON(t, viaMCP), asJSON(t, viaCore)); diff != "" {
+				t.Errorf("result (-call_tool +callCore):\n%s", diff)
+			}
+
+			if len(fromMCP) != 1 || len(fromCore) != 1 {
+				t.Fatalf("recorded %d calls through call_tool and %d through callCore, want 1 each", len(fromMCP), len(fromCore))
+			}
+
+			if got := fromCore[0]; got.Client != "wayfindr-cli" || got.TokenName != "admin" {
+				t.Errorf("callCore recorded client %q, token %q, want wayfindr-cli, admin", got.Client, got.TokenName)
+			}
+
+			if (fromMCP[0].Duration != nil) != (fromCore[0].Duration != nil) {
+				t.Errorf("Duration set through call_tool %v, through callCore %v, want the same", fromMCP[0].Duration != nil, fromCore[0].Duration != nil)
+			}
+
+			ignore := cmpopts.IgnoreFields(store.Call{}, "Client", "TokenName", "StartedAt", "Duration")
+
+			if diff := cmp.Diff(fromMCP[0], fromCore[0], ignore); diff != "" {
+				t.Errorf("call log row (-call_tool +callCore):\n%s", diff)
+			}
+		})
+	}
+}
+
+// asJSON is what res says, as JSON, so a result that crossed the wire
+// compares with one that didn't. The _meta and resultType the SDK adds on
+// the wire are left out.
+func asJSON(t *testing.T, res *mcp.CallToolResult) string {
+	t.Helper()
+	b, err := json.Marshal(struct {
+		Content           []mcp.Content
+		StructuredContent any
+		IsError           bool
+	}{res.Content, res.StructuredContent, res.IsError})
+
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+
+	return string(b)
+}
+
+// TestCallCoreRefusesACallWithoutNarrow: Narrow is required, and a door
+// that leaves it out is refused as a request with no Client is, never
+// served unnarrowed.
+func TestCallCoreRefusesACallWithoutNarrow(t *testing.T) {
+	rec := &recorder{}
+	e := newEnvWith(t, envOptions{
+		fakes:   map[string][]fakeupstream.Option{"linear": {fakeupstream.WithTools(createIssue())}},
+		gateway: gateway.Options{Calls: rec},
+	})
+	res := e.gateway.CallCore(t.Context(),
+		gateway.CallRequest{Name: "linear.create_issue", Args: json.RawMessage(`{"title":"x"}`)},
+		gateway.CallOptions{Client: clienttoken.Default()})
+
+	if !res.IsError {
+		t.Errorf("result %+v, want an error", res)
+	}
+
+	if got := rec.take(); len(got) != 1 || got[0].ErrorKind != "internal" || got[0].ErrorCase != "no_client" {
+		t.Errorf("call log %+v, want one internal/no_client call", got)
 	}
 }

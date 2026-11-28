@@ -240,7 +240,7 @@ func TestIssuedGrantTokenResolvesAsARemoteScopedClient(t *testing.T) {
 	p := h.issue("chatgpt", created)
 	got, ok := h.tokens.registry.Lookup(p.access.Digest)
 
-	if want := (clienttoken.Client{Name: "chatgpt", Connectors: []string{"github", "linear"}, Remote: true}); !ok || !cmp.Equal(want, got) {
+	if want := (clienttoken.Client{Name: "chatgpt", Connectors: []string{"github", "linear"}, Remote: true, Created: created}); !ok || !cmp.Equal(want, got) {
 		t.Fatalf("Lookup of the issued access token = %+v, %v; want %+v", got, ok, want)
 	}
 
@@ -471,4 +471,83 @@ func TestSuspendedGrantGetsNoTokensAndKeepsItsRefreshToken(t *testing.T) {
 	if got, err := h.tokens.GrantToken(t.Context(), p.refresh.Digest); err != nil || got.UsedAt != nil {
 		t.Errorf("refresh token after a refused rotation = %+v, %v; want it unspent", got, err)
 	}
+}
+
+// TestARecreatedNameIsAnotherInstance: revoking a client token or a grant
+// frees its name, so the Client of a token re-created under it must be
+// another instance (clienttoken.Client.Instance), which a request state
+// sealed for the old one refuses. A grant's rotated access token is the
+// same instance, and so is a token read back after a restart.
+func TestARecreatedNameIsAnotherInstance(t *testing.T) {
+	h := newGrantHost(t)
+
+	instanceOf := func(d [sha256.Size]byte) string {
+		t.Helper()
+		c, ok := h.tokens.registry.Lookup(d)
+
+		if !ok {
+			t.Fatal("the registry does not resolve the token")
+		}
+
+		return c.Instance()
+	}
+
+	t.Run("client token", func(t *testing.T) {
+		_, value, err := h.tokens.Create(t.Context(), "nightly", []string{"github"}, false)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		before := instanceOf(clienttoken.Digest(value))
+		loaded, err := loadClientTokens(t.Context(), h.store, h.user, h.clock.Now)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if c, ok := loaded.Lookup(clienttoken.Digest(value)); !ok || c.Instance() != before {
+			t.Errorf("after a restart the token is instance %q (found %v), want %q", c.Instance(), ok, before)
+		}
+
+		if err := h.tokens.Revoke(t.Context(), "nightly"); err != nil {
+			t.Fatal(err)
+		}
+
+		h.clock.advance(time.Second)
+		_, value, err = h.tokens.Create(t.Context(), "nightly", []string{"github"}, false)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if after := instanceOf(clienttoken.Digest(value)); after == before || before == "nightly" {
+			t.Errorf("re-created token is instance %q, the revoked one %q; want two instances, neither the bare name", after, before)
+		}
+	})
+
+	t.Run("grant", func(t *testing.T) {
+		created := h.grant("chatgpt")
+		first := h.issue("chatgpt", created)
+		before := instanceOf(first.access.Digest)
+		next := h.pair("chatgpt")
+
+		if err := h.tokens.RotateGrantTokens(t.Context(), first.refresh.Digest, next.access, next.refresh); err != nil {
+			t.Fatal(err)
+		}
+
+		if rotated := instanceOf(next.access.Digest); rotated != before {
+			t.Errorf("rotated access token is instance %q, want the grant's %q", rotated, before)
+		}
+
+		if err := h.tokens.Revoke(t.Context(), "chatgpt"); err != nil {
+			t.Fatal(err)
+		}
+
+		h.clock.advance(time.Second)
+
+		if after := instanceOf(h.issue("chatgpt", h.grant("chatgpt")).access.Digest); after == before {
+			t.Errorf("re-created grant is instance %q, the same as the revoked one", after)
+		}
+	})
 }

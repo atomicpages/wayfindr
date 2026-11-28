@@ -2,6 +2,8 @@ package gateway_test
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -10,6 +12,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/atomicpages/wayfindr/internal/clienttoken"
+	"github.com/atomicpages/wayfindr/internal/config"
 	"github.com/atomicpages/wayfindr/internal/gateway"
 	"github.com/atomicpages/wayfindr/internal/store"
 	"github.com/atomicpages/wayfindr/internal/testutil/fakeupstream"
@@ -306,4 +310,190 @@ func TestCallToolRefusedAnswerReleasesTheQuestion(t *testing.T) {
 
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// TestCallToolRefusesAStateFromAnotherToken: a request state is bound to
+// the client token whose call was asked, so an answer sent with another
+// token is refused, even one allowed the same connector. That refusal
+// leaves the question alone: the client it was put to can still answer it.
+func TestCallToolRefusesAStateFromAnotherToken(t *testing.T) {
+	for _, uv := range upstreamVersions() {
+		t.Run("upstream "+uv, func(t *testing.T) {
+			rec := &recorder{}
+			e := newEnvWith(t, envOptions{
+				fakes:           map[string][]fakeupstream.Option{"linear": {fakeupstream.WithElicitation()}},
+				upstreamVersion: uv,
+				gateway:         gateway.Options{Calls: rec},
+			})
+			asker := connectWith(t, e.url, fakeupstream.V20260728, answering(true))
+			other := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0"}, answering(true))
+			stranger, err := other.Connect(t.Context(), &mcp.StreamableClientTransport{
+				Endpoint:   e.url,
+				MaxRetries: -1,
+				HTTPClient: &http.Client{Transport: withHeader(scopedToken("linear"))},
+			}, &mcp.ClientSessionOptions{ProtocolVersion: fakeupstream.V20260728})
+
+			if err != nil {
+				t.Fatalf("Connect with the scoped token: %v", err)
+			}
+
+			t.Cleanup(func() { _ = stranger.Close() })
+
+			res, err := asker.CallTool(t.Context(), elicitCall())
+
+			if err != nil || !res.NeedsInput() {
+				t.Fatalf("CallTool = (%+v, %v), want input_required", res, err)
+			}
+
+			p := elicitCall()
+			p.RequestState = res.RequestState
+
+			for id := range res.InputRequests {
+				p.InputResponses = mcp.InputResponseMap{id: &mcp.ElicitResult{Action: "accept", Content: map[string]any{"answer": "yes"}}}
+			}
+
+			rec.take()
+			refused, err := stranger.CallTool(t.Context(), p)
+
+			if err != nil {
+				t.Fatalf("CallTool with the other token: %v", err)
+			}
+
+			if got := text(t, refused); !refused.IsError || !strings.Contains(got, "does not belong to this call") {
+				t.Errorf("result (isError %v) %q, want the invalid request state error", refused.IsError, got)
+			}
+
+			if calls := rec.take(); len(calls) != 1 || calls[0].ErrorKind != "invalid_request_state" || calls[0].TokenName != "nightly" {
+				t.Errorf("call log %+v, want one invalid_request_state call by nightly", calls)
+			}
+
+			answered, err := asker.CallTool(t.Context(), p)
+
+			if err != nil {
+				t.Fatalf("CallTool with the asker's answer: %v", err)
+			}
+
+			if got := text(t, answered); answered.IsError || got != wantAnswer {
+				t.Errorf("asker's answer after the refusal: result (isError %v) %q, want %s", answered.IsError, got, wantAnswer)
+			}
+		})
+	}
+}
+
+// TestCallCoreBindsTheStateToTheTokenInstance: a request state is bound to
+// the instance of the client token whose call was asked, not only its
+// name. Revoking a token frees its name, so a token re-created under it
+// within the state's lifetime is refused, and its refused answer leaves
+// the question for the token it was put to. The asked token's own refused
+// answer does discard it. Driven through CallCore (export_test.go), a
+// deliberate seam exception the call-core plan asked for: no MCP request
+// can carry two instances of one name.
+func TestCallCoreBindsTheStateToTheTokenInstance(t *testing.T) {
+	// A 2025-11-25 upstream parks its question, so a discard is observable:
+	// until it, a new question is declined as ambiguous.
+	e := newEnv(t, map[string][]fakeupstream.Option{"linear": {fakeupstream.WithElicitation(), fakeupstream.WithTools(createIssue())}})
+	created := time.Date(2026, 11, 25, 9, 0, 0, 0, time.UTC)
+	asked := clienttoken.Client{Name: "nightly", Connectors: []string{"linear"}, Created: created}
+	recreated := asked
+	recreated.Created = created.Add(time.Minute)
+
+	optsFor := func(c clienttoken.Client) gateway.CallOptions {
+		return gateway.CallOptions{
+			Client:     c,
+			ClientName: "test-client",
+			Narrow:     func() (config.Narrowing, error) { return config.Narrowing{Token: c.Connectors}, nil },
+			Asker: gateway.Asker{
+				ProtocolVersion: fakeupstream.V20260728,
+				Capabilities:    &mcp.ClientCapabilities{Elicitation: &mcp.ElicitationCapabilities{}},
+			},
+		}
+	}
+	elicit := gateway.CallRequest{Name: "linear." + fakeupstream.ToolElicit}
+
+	// ask puts a new question to c and returns its state and answer.
+	ask := func(t *testing.T, c clienttoken.Client) *gateway.Resume {
+		t.Helper()
+		res := e.gateway.CallCore(t.Context(), elicit, optsFor(c))
+
+		// NeedsInput reads the resultType the SDK sets on the wire, which a
+		// result straight from callCore doesn't have yet.
+		if len(res.InputRequests) == 0 || res.RequestState == "" {
+			t.Fatalf("CallCore = %+v, want input_required", res)
+		}
+
+		r := &gateway.Resume{State: res.RequestState, Responses: mcp.InputResponseMap{}}
+
+		for id := range res.InputRequests {
+			r.Responses[id] = &mcp.ElicitResult{Action: "accept", Content: map[string]any{"answer": "yes"}}
+		}
+
+		return r
+	}
+
+	answer := func(t *testing.T, c clienttoken.Client, r *gateway.Resume) *mcp.CallToolResult {
+		t.Helper()
+		req := elicit
+		req.Resume = r
+
+		return e.gateway.CallCore(t.Context(), req, optsFor(c))
+	}
+
+	wantRefusedState := func(t *testing.T, res *mcp.CallToolResult) {
+		t.Helper()
+
+		if got := text(t, res); !res.IsError || !strings.Contains(got, "does not belong to this call") {
+			t.Errorf("result (isError %v) %q, want the invalid request state error", res.IsError, got)
+		}
+	}
+
+	wantAnswered := func(t *testing.T, res *mcp.CallToolResult) {
+		t.Helper()
+
+		if got := text(t, res); res.IsError || got != wantAnswer {
+			t.Errorf("result (isError %v) %q, want %s", res.IsError, got, wantAnswer)
+		}
+	}
+
+	t.Run("its own token answers", func(t *testing.T) {
+		wantAnswered(t, answer(t, asked, ask(t, asked)))
+	})
+
+	t.Run("a re-created token is refused and leaves the question", func(t *testing.T) {
+		r := ask(t, asked)
+		wantRefusedState(t, answer(t, recreated, r))
+		wantAnswered(t, answer(t, asked, r))
+	})
+
+	t.Run("its own token's refused answer discards the question", func(t *testing.T) {
+		r := ask(t, asked)
+		other := gateway.CallRequest{Name: "linear.create_issue", Args: json.RawMessage(`{"title":"x"}`), Resume: r}
+		wantRefusedState(t, e.gateway.CallCore(t.Context(), other, optsFor(asked)))
+
+		// The upstream's call ends once told cancel; until then, a new
+		// question would be declined as ambiguous.
+		deadline := time.Now().Add(5 * time.Second)
+
+		for {
+			res := e.gateway.CallCore(t.Context(), elicit, optsFor(asked))
+
+			if len(res.InputRequests) > 0 {
+				wantAnswered(t, answer(t, asked, &gateway.Resume{State: res.RequestState, Responses: r.Responses}))
+
+				return
+			}
+
+			if time.Now().After(deadline) {
+				t.Fatalf("CallCore after the refusal = %+v, want input_required", res)
+			}
+
+			time.Sleep(20 * time.Millisecond)
+		}
+	})
+
+	// Last: the question it leaves can't be answered or discarded, so it
+	// stays parked until the test ends.
+	t.Run("a client with no token instance can't answer", func(t *testing.T) {
+		nobody := clienttoken.Client{Connectors: []string{"linear"}}
+		wantRefusedState(t, answer(t, nobody, ask(t, nobody)))
+	})
 }

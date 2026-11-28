@@ -390,8 +390,9 @@ arguments. MCP SDKs at 2026-07-28 do this for you. The upstream may ask again,
 and the round repeats until it returns its result.
 
 The `requestState` is sealed by the daemon and only works for the same tool and
-arguments, for 10 minutes. Clients that can't take `input_required` get an error
-instead; see
+arguments, sent with the same client token, for 10 minutes. A token created
+under the name of a revoked one counts as another token. Clients that can't
+take `input_required` get an error instead; see
 [Compatibility](./compatibility#questions-from-upstreams-elicitation) for which
 clients can be asked.
 

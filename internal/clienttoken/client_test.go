@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -66,7 +67,7 @@ func TestTokenInfoRoundTrip(t *testing.T) {
 	for _, c := range []clienttoken.Client{
 		clienttoken.Default(),
 		{Name: "nightly", Connectors: []string{"github", "linear"}},
-		{Name: "grok", Connectors: []string{"github"}, Remote: true},
+		{Name: "grok", Connectors: []string{"github"}, Remote: true, Created: time.Date(2026, 11, 25, 9, 0, 0, 0, time.UTC)},
 	} {
 		ti := c.TokenInfo()
 
@@ -100,5 +101,31 @@ func TestFromTokenInfoRefusesMissing(t *testing.T) {
 		if _, ok := clienttoken.FromTokenInfo(ti); ok {
 			t.Errorf("FromTokenInfo(%+v) found a client", ti)
 		}
+	}
+}
+
+// TestInstance: a token's instance is its name and when it was created, so
+// a token re-created under a revoked one's name is another instance. The
+// default token's is its name; the zero Client has none.
+func TestInstance(t *testing.T) {
+	created := time.Date(2026, 11, 25, 9, 0, 0, 123_456_789, time.UTC)
+	tests := []struct {
+		name string
+		c    clienttoken.Client
+		want string
+	}{
+		{"default", clienttoken.Default(), "default"},
+		{"scoped", clienttoken.Client{Name: "nightly", Connectors: []string{"github"}, Created: created}, "nightly@1795597200123"},
+		{"same millisecond elsewhere", clienttoken.Client{Name: "nightly", Created: created.In(time.FixedZone("HST", -10*3600)).Truncate(time.Millisecond)}, "nightly@1795597200123"},
+		{"re-created later", clienttoken.Client{Name: "nightly", Created: created.Add(time.Millisecond)}, "nightly@1795597200124"},
+		{"zero", clienttoken.Client{}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.c.Instance(); got != tt.want {
+				t.Errorf("Instance() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

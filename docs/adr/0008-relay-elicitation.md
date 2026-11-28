@@ -2,7 +2,12 @@
 
 Status: Accepted (2026-11-09). Amends the elicitation part of
 [0003](./0003-single-daemon) and the out-of-scope consequence of
-[0001](./0001-two-meta-tools).
+[0001](./0001-two-meta-tools). Amended:
+
+- 2026-11-25 (wayfindr-05sq): the `requestState` is also bound to the client
+  token whose call was asked, by its name and creation time, so a token
+  created again under a revoked one's name is another token
+  ([0012](./0012-scoped-client-tokens)).
 
 ## Context
 
@@ -35,7 +40,12 @@ sessions, so it can receive the request.
 - `call_tool` returns `input_required` to clients at 2026-07-28 that declare
   elicitation. Each question's id and message name the connector. The
   `requestState` is sealed with the master key and bound to the user, tool,
-  arguments, and an expiry. An answer that doesn't match is refused.
+  arguments, and an expiry. It is also bound to the client token whose call
+  was asked, by its name and creation time (amended 2026-11-25,
+  wayfindr-05sq), so an answer sent with another token, or with a token
+  created again under a revoked one's name, is refused and leaves the
+  question for its own client. An answer that
+  doesn't match is refused.
 - Older HTTP clients, and clients without elicitation, get an error that points
   at `wayfindr stdio`. The shim passes `input_required` through to a client at
   2026-07-28. It asks an older client directly with `elicitation/create`, which
