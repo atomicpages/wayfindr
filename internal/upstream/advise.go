@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"cmp"
+	"fmt"
 	"strings"
 	"time"
 
@@ -94,8 +95,10 @@ func (s ConnectorStatus) Stuck(now time.Time) (Advice, bool) {
 }
 
 const (
-	adviseReauth = "Open the link to authorize the connector again."
-	adviseRetry  = "Wayfindr reconnects on the next call."
+	adviseReauth         = "Open the link to authorize the connector again."
+	adviseRetry          = "Wayfindr reconnects on the next call."
+	adviseNoLimitSetting = "There is no setting that raises this limit."
+	adviseKeepsCatalog   = "The catalog keeps the tools of the last sync that worked."
 )
 
 // kindAdvice is the advice every error of e's Kind gets.
@@ -125,6 +128,8 @@ func kindAdvice(e *Error) (summary, action string) {
 		return "The upstream refused the request.", "Check the tool name and its arguments against the tool's schema."
 	case KindUnreachable:
 		return "The upstream cannot be reached.", "Check that it is running and the network. " + adviseRetry
+	case KindResponseTooLarge:
+		return e.Connector + " sent more than Wayfindr reads in one answer.", adviseNoLimitSetting
 	}
 
 	return "", "" // not a Kind constant
@@ -260,6 +265,20 @@ func caseAdvice(e *Error) (summary, action string) {
 			"Wait a moment and try again."
 	case CaseAuthInternal:
 		return "Wayfindr's credential handling failed for this call.", "Try again; if it persists, check the daemon log."
+	case CaseBody, CaseMessage:
+		return fmt.Sprintf("%s returned more than %d MiB in one message.", e.Connector, maxMessageBytes>>20),
+			"Call it with narrower arguments or pagination. " + adviseNoLimitSetting
+	case CaseSyncPages:
+		return fmt.Sprintf("%s's tool list is longer than Wayfindr reads (more than %d pages, or a page cursor that repeats).",
+				e.Connector, maxSyncPages),
+			adviseKeepsCatalog + " Ask the server's maintainer to fix its tools/list pagination."
+	case CaseSyncBytes:
+		return fmt.Sprintf("%s's tool list is longer than Wayfindr reads (more than %d MiB of tool definitions).",
+				e.Connector, maxSyncBytes>>20),
+			adviseKeepsCatalog + " Configure the server to serve fewer tools, or smaller schemas, if it can."
+	case CaseSyncTools:
+		return fmt.Sprintf("%s's tool list is longer than Wayfindr reads (more than %d tools).", e.Connector, maxSyncTools),
+			adviseKeepsCatalog + " Configure the server to serve fewer tools, if it can."
 	}
 
 	return "", "" // no Case, or not a Case constant

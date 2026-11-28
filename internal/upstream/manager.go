@@ -110,6 +110,15 @@ type Options struct {
 	// gets this one, and so does a needs_auth connector's status. Optional.
 	AuthURL func(connector string) string
 
+	// MaxMessageBytes bounds one upstream message (an HTTP response body,
+	// an SSE event, a stdio line). Zero means 16 MiB. It is not a user
+	// setting; tests lower it.
+	MaxMessageBytes int
+	// MaxSyncBytes bounds the tool definitions one ListTools keeps, across
+	// its pages. Zero means 32 MiB. It is not a user setting; tests lower
+	// it.
+	MaxSyncBytes int
+
 	// Clients holds each url connector's HTTP client, built from its [tls]
 	// table: the base transport of its MCP traffic, under the header
 	// injector and the auth hook, so the MCP server and the authorization
@@ -170,6 +179,8 @@ type Manager struct {
 	connectTimeout time.Duration
 	authURL        func(connector string) string
 	clients        *httpclient.Clients
+	maxMessage     int
+	maxSyncBytes   int
 
 	// applyMu serializes Apply and Close, and guards closed.
 	applyMu sync.Mutex
@@ -218,6 +229,18 @@ func New(opts Options) *Manager {
 		now = time.Now
 	}
 
+	maxMessage := opts.MaxMessageBytes
+
+	if maxMessage <= 0 {
+		maxMessage = maxMessageBytes
+	}
+
+	maxSync := opts.MaxSyncBytes
+
+	if maxSync <= 0 {
+		maxSync = maxSyncBytes
+	}
+
 	interactionTTL := opts.InteractionTTL
 
 	if interactionTTL <= 0 {
@@ -235,6 +258,8 @@ func New(opts Options) *Manager {
 		connectTimeout: connectTimeout,
 		authURL:        opts.AuthURL,
 		clients:        opts.Clients,
+		maxMessage:     maxMessage,
+		maxSyncBytes:   maxSync,
 		connectors:     map[string]*connector{},
 		stopReaper:     make(chan struct{}),
 		reaperDone:     make(chan struct{}),
@@ -457,7 +482,7 @@ func (m *Manager) reap() {
 
 		if c.session != nil && c.cfg.IsStdio() && c.inUse == 0 && now.Sub(c.lastUsed) > idleTimeout {
 			idle = append(idle, idleSession{c.session, c.mask})
-			c.session, c.sessionDone, c.halt = nil, nil, nil
+			c.session, c.sessionDone, c.halt, c.overflow = nil, nil, nil, nil
 			m.log.Info().Str("connector", c.name).Msg("stopping idle stdio upstream")
 		}
 
@@ -598,7 +623,7 @@ func (m *Manager) acquire(ctx context.Context, c *connector) (l lease, err error
 	}
 
 	if err == nil {
-		l.session, l.epoch, l.mask = c.session, c.sessionEpoch, c.mask
+		l.session, l.epoch, l.mask, l.overflow = c.session, c.sessionEpoch, c.mask, c.overflow
 		c.inUse++
 	}
 
@@ -630,6 +655,8 @@ type lease struct {
 	// mask is the connector's mask when the use began, for the use's
 	// verdict, which is judged without the connector's lock.
 	mask redact.Values
+	// overflow is session's overflow record, for the use's verdict.
+	overflow *overflow
 	// release ends the use.
 	release func()
 }
@@ -945,6 +972,9 @@ func (m *Manager) connect(ctx context.Context, c *connector) error {
 		return m.connectFailed(ctx, c, err)
 	}
 
+	// Only what comes over the session from here on is its own overflow.
+	d.overflow.reset()
+
 	done := make(chan struct{})
 	go func() {
 		// Wait ends when the session closes, by closeSession or by the
@@ -952,7 +982,7 @@ func (m *Manager) connect(ctx context.Context, c *connector) error {
 		_ = s.Wait()
 		close(done)
 	}()
-	c.session, c.sessionDone, c.sessionEpoch, c.halt = s, done, c.epoch, d.halt
+	c.session, c.sessionDone, c.sessionEpoch, c.halt, c.overflow = s, done, c.epoch, d.halt, d.overflow
 	c.lastUsed = m.now()
 	m.record(c, EventSynced, "", nil, c.sessionEpoch)
 
@@ -1233,6 +1263,9 @@ type connector struct {
 	// halt ends every request of session's transport (see dialed.halt).
 	// Nil when session is.
 	halt func()
+	// overflow records a message session's transport cut off for being
+	// over the limit (see dialed.overflow). Nil when session is.
+	overflow *overflow
 	// mask hides the values of the references the connector was last
 	// dialed with (see dialed.mask) in the text of its errors.
 	mask redact.Values
@@ -1319,7 +1352,7 @@ func (c *connector) closeSession(ctx context.Context) error {
 	err := c.session.Close()
 	stop()
 	c.halt()
-	c.session, c.sessionDone, c.halt = nil, nil, nil
+	c.session, c.sessionDone, c.halt, c.overflow = nil, nil, nil, nil
 
 	return c.mask.Err(err)
 }

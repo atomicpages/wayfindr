@@ -55,6 +55,7 @@ explains every column and section.
 | `redirect_uri_mismatch`, or a Google connector asking you to sign in again                                          | [Troubleshooting OAuth and TLS](./troubleshooting-oauth)                             |
 | A tool is missing from search, or the agent picks the wrong one                                                     | [Tools and search](#tools-and-search)                                                |
 | `The call outlasted the connector's timeout.`                                                                       | [A call times out](#a-call-times-out)                                                |
+| `returned more than 16 MiB in one message`, or `response_too_large` in `wayfindr status`                            | [An answer is too large](#an-answer-is-too-large)                                    |
 | The agent says a tool call failed                                                                                   | [The agent says a tool call failed](#the-agent-says-a-tool-call-failed)              |
 | `is hidden by …`, or `asks for the Wayfindr profile …`                                                              | [Scopes, profiles, and tokens](#scopes-profiles-and-tokens)                          |
 | `needs your input, but your client …`                                                                               | [Questions from tools](#questions-from-tools)                                        |
@@ -323,6 +324,9 @@ daemon starts, then restart it. Or store the value as a secret and reference
   try other words, or turn on [embeddings](./embeddings).
 - Run `wayfindr scope` where the agent works: a project scope or profile may
   hide it there.
+- If `LAST SYNC` ends in `(failed)` with `response_too_large`, the server's
+  tool list is longer than Wayfindr reads. See
+  [An answer is too large](#an-answer-is-too-large).
 
 To re-sync a connector now, restart the daemon. See
 [The catalog](./search#the-catalog) for when syncs happen.
@@ -366,6 +370,31 @@ wayfindr connector edit slow-reports --timeout 10m
 Your client may also limit how long a tool call can take; check its MCP settings
 if calls stop sooner. See [Timeouts](./connectors#timeouts).
 
+### An answer is too large
+
+```text
+linear returned more than 16 MiB in one message.
+To fix: Call it with narrower arguments or pagination. There is no setting that raises this limit.
+```
+
+Wayfindr reads at most 16 MiB of one message from an upstream: an HTTP response,
+or one line of a stdio server's output. A larger one fails the call, and
+`wayfindr calls` shows it as `failed: body` (HTTP) or `failed: message` (stdio).
+Wayfindr closes the connection, so the next call reconnects. The connector stays
+`ready`. Ask for less: most tools that can return that much take a filter, a
+limit, or a page.
+
+An event of a streamed answer has the same limit. A larger one breaks the
+stream, so the call fails as `unreachable`, and the next call reconnects.
+
+A tool list has limits too: 50 pages, 2,000 tools, and 32 MiB of tool
+definitions, and a page cursor may not repeat. A sync past them fails with
+`response_too_large (sync_pages)`, `(sync_tools)`, or `(sync_bytes)` under
+`Last sync failed:` in `wayfindr status`, and the catalog keeps the tools from
+the last sync that worked. The server is serving more tools
+than an agent can use, or its paging is broken; if it has a setting for which
+tools it serves, narrow them.
+
 ### The agent says a tool call failed
 
 List the calls that didn't succeed:
@@ -381,6 +410,7 @@ RESULT says how each call ended, and the reason after the colon says why:
 | `tool_error`                                                                                     | The upstream ran the tool and returned its own error.                                                                             | Read the error in the agent's transcript. Wayfindr never logs results, so it doesn't have the message. |
 | `rejected: …`                                                                                    | Wayfindr refused the call without calling the upstream: an unknown tool, arguments that don't match its schema, or a hidden tool. | See [Scopes, profiles, and tokens](#scopes-profiles-and-tokens).                                       |
 | `failed: timeout`                                                                                | The call outlasted the connector's timeout.                                                                                       | See [A call times out](#a-call-times-out).                                                             |
+| `failed: body` or `message`                                                                      | The upstream answered with more than 16 MiB in one message.                                                                       | See [An answer is too large](#an-answer-is-too-large).                                                 |
 | `failed: unreachable`, `connect_refused`, `connect_timeout`, `spawn_failed`, or `auth_server`    | Wayfindr couldn't reach the upstream or start its command.                                                                        | Run `wayfindr status`; see [Connector states](#connector-states).                                      |
 | `failed: needs_auth`, `no_credential`, `refresh_failed`, `token_revoked`, or another auth reason | The connector has no usable credential, or its auth setup is wrong.                                                               | Run `wayfindr status`; see [OAuth errors](./troubleshooting-oauth#oauth-errors).                       |
 | `failed: secret` or `failed: env`                                                                | The connector's config refers to a secret or variable that isn't set.                                                             | See [A missing secret](#a-missing-secret) or [variable](#a-missing-environment-variable).              |

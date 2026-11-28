@@ -27,6 +27,10 @@ const stopGrace = 5 * time.Second
 type stdioTransport struct {
 	cmd *exec.Cmd
 	log zerolog.Logger
+	// limit bounds one line of the child's stdout, and overflow records a
+	// line cut off for passing it (see lineLimitReader).
+	limit    int
+	overflow *overflow
 }
 
 // Connect starts the command.
@@ -57,9 +61,14 @@ func (t *stdioTransport) Connect(ctx context.Context) (mcp.Connection, error) {
 	}
 
 	child := &stdioChild{cmd: t.cmd, stdin: stdin, group: g}
+	out := &lineLimitReader{r: stdout, limit: t.limit, overflow: t.overflow}
 	// Closing the connection closes stdout's reader, which must not stop
 	// the child (Wait closes the pipe), and then child, which does.
-	conn, err := (&mcp.IOTransport{Reader: io.NopCloser(stdout), Writer: child}).Connect(ctx)
+	//
+	// out bounds each line, and its overflow is recorded. The SDK's own
+	// bound on one JSON value is set past it, to stop only a value spread
+	// over many lines, which out can't see.
+	conn, err := (&mcp.IOTransport{Reader: io.NopCloser(out), Writer: child, MaxLineLength: 2 * t.limit}).Connect(ctx)
 
 	if err != nil {
 		// Nothing else would stop the child; its exit error adds nothing.

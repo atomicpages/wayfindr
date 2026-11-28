@@ -47,6 +47,11 @@ const (
 	// connection refused, connect timed out or given up on, the auth server
 	// failed). The connector is unreachable; the next use reconnects.
 	KindUnreachable Kind = "unreachable"
+	// KindResponseTooLarge: the upstream sent more than Wayfindr reads: one
+	// message over the message limit (16 MiB), which closes the session, or
+	// a tool list over the sync limits. The state is unchanged: one
+	// oversized answer says nothing about the upstream's health.
+	KindResponseTooLarge Kind = "response_too_large"
 )
 
 // Case is the finer reason within a [Kind] (GLOSSARY: Case). It is a
@@ -193,6 +198,24 @@ const (
 	// CaseAuthInternal: Wayfindr's own auth side failed (its credential
 	// store, or a request that could not be sent again).
 	CaseAuthInternal Case = "auth_internal"
+)
+
+// Cases of [KindResponseTooLarge].
+const (
+	// CaseBody: an HTTP response body (a JSON answer or an error body) was
+	// over the message limit.
+	CaseBody Case = "body"
+	// CaseMessage: a line of a stdio child's stdout, one message, was over
+	// the message limit.
+	CaseMessage Case = "message"
+	// CaseSyncPages: the tool list ran past the page limit, or named a page
+	// cursor it had already named.
+	CaseSyncPages Case = "sync_pages"
+	// CaseSyncTools: the tool list ran past the tool limit.
+	CaseSyncTools Case = "sync_tools"
+	// CaseSyncBytes: the tool list's definitions, across its pages, ran
+	// past the byte limit.
+	CaseSyncBytes Case = "sync_bytes"
 )
 
 // Error is every error Call and ListTools return (CODING_STANDARDS: Seam

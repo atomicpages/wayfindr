@@ -13,7 +13,7 @@ func TestAdviseCoversEveryKind(t *testing.T) {
 	kinds := []upstream.Kind{
 		upstream.KindUnknownConnector, upstream.KindNeedsAuth, upstream.KindAuthConfig,
 		upstream.KindMissingValue, upstream.KindInteractiveInput, upstream.KindTimeout,
-		upstream.KindCanceled, upstream.KindRejected, upstream.KindUnreachable,
+		upstream.KindCanceled, upstream.KindRejected, upstream.KindUnreachable, upstream.KindResponseTooLarge,
 	}
 
 	for _, k := range kinds {
@@ -47,6 +47,9 @@ func TestAdviseCoversEveryCase(t *testing.T) {
 			upstream.CaseConnectRefused, upstream.CaseConnectTimeout, upstream.CaseConnectCanceled,
 			upstream.CaseSpawnFailed, upstream.CaseAuthServer, upstream.CaseProviderUnavailable,
 			upstream.CaseAuthInternal,
+		},
+		upstream.KindResponseTooLarge: {
+			upstream.CaseBody, upstream.CaseMessage, upstream.CaseSyncPages, upstream.CaseSyncTools, upstream.CaseSyncBytes,
 		},
 	}
 

@@ -43,6 +43,11 @@ type outcome struct {
 	// timedOut says the context ended because the connector's timeout
 	// passed (its cause is errUseTimeout), not because the caller gave up.
 	timedOut bool
+	// overflow is the Case (CaseBody or CaseMessage) of a message the
+	// session's transport cut off for being over the limit; "" if none
+	// was. The SDK flattens that read error into text, so it is read from
+	// the session's overflow record rather than from err.
+	overflow Case
 }
 
 // verdict is what an outcome means (GLOSSARY: Verdict). The Manager
@@ -91,10 +96,15 @@ var errSpawn = errors.New("start stdio child")
 //     upstream.
 //  7. rejected, in the use phase only: the upstream answered with a
 //     JSON-RPC error, so synced.
-//  8. unreachable: everything else, including a connect given up on,
+//  8. response_too_large, in the use phase only: a message over the
+//     limit (the session is closed, since the transport is broken), or a
+//     tool list over the sync limits (it is not). The state is untouched:
+//     one oversized answer says nothing about the upstream's health.
+//  9. unreachable: everything else, including a connect given up on,
 //     which must not leave the connector in starting.
 //
-// Rules 2–4 and 8 close the session; 5–7 don't.
+// Rules 2–4 and 9 close the session, and so does rule 8 for a message;
+// 5–7 don't.
 func judge(o outcome) verdict {
 	if o.err == nil && !o.declined {
 		return verdict{event: EventSynced}
@@ -106,6 +116,7 @@ func judge(o outcome) verdict {
 	var ac authConfiger
 	var rerr *config.ResolveError
 	var terr *config.TemplateError
+	var serr *syncOverflowError
 
 	switch {
 	case errors.As(o.err, &na):
@@ -166,6 +177,12 @@ func judge(o outcome) verdict {
 	case o.phase == phaseUse && isProtocolError(o.err):
 		e.Kind = KindRejected
 		v = verdict{event: EventSynced}
+	case o.phase == phaseUse && o.overflow != "":
+		e.Kind, e.Case = KindResponseTooLarge, o.overflow
+		v = verdict{closeSession: true}
+	case o.phase == phaseUse && errors.As(o.err, &serr):
+		e.Kind, e.Case = KindResponseTooLarge, serr.kase
+		v = verdict{}
 	default:
 		e.Kind, e.Case = KindUnreachable, unreachableCase(o)
 		v = verdict{event: EventTransportError, closeSession: true}

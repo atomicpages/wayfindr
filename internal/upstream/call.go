@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -109,6 +110,7 @@ func (m *Manager) runCall(ctx context.Context, r *run, l lease, params *mcp.Call
 
 	v := judge(contextOutcome(ctx, outcome{
 		connector: c.name, phase: phaseUse, err: err, declined: declined, ambiguous: r.ambiguous.Load(), mask: l.mask,
+		overflow: l.overflow.seen(),
 	}))
 	// The close a verdict calls for still tries its DELETE when the run's
 	// ctx has ended, often why the call failed.
@@ -226,6 +228,13 @@ func (m *Manager) PeekTools(ctx context.Context, name string) ([]*mcp.Tool, erro
 // with the list's cache hint: the smallest page's, or 0 if any page has
 // none.
 //
+// It follows at most maxSyncPages pages and keeps at most maxSyncTools
+// tools, whose definitions add up to at most maxSyncBytes (or
+// Options.MaxSyncBytes), and fails
+// response_too_large past any of them, or on a cursor the list already
+// named: an upstream must not keep a sync going, or growing, forever. The
+// caller keeps its last good list.
+//
 // It pages with ClientSession.ListTools rather than the Tools iterator,
 // which yields only the tools and drops each page's ttlMs.
 func (m *Manager) listTools(ctx context.Context, name string) ([]*mcp.Tool, time.Duration, error) {
@@ -235,8 +244,10 @@ func (m *Manager) listTools(ctx context.Context, name string) ([]*mcp.Tool, time
 	)
 	err := m.use(ctx, name, func(ctx context.Context, s *mcp.ClientSession) (bool, error) {
 		params := &mcp.ListToolsParams{}
+		cursors := map[string]bool{}
+		size := 0
 
-		for first := true; ; first = false {
+		for n := 1; ; n++ {
 			res, err := s.ListTools(ctx, params)
 
 			if err != nil {
@@ -244,18 +255,46 @@ func (m *Manager) listTools(ctx context.Context, name string) ([]*mcp.Tool, time
 			}
 
 			tools = append(tools, res.Tools...)
+
+			if len(tools) > maxSyncTools {
+				return false, &syncOverflowError{kase: CaseSyncTools, detail: fmt.Sprintf("more than %d tools", maxSyncTools)}
+			}
+
+			// Re-encoding is the honest measure of what the list keeps:
+			// the bytes on the wire are not all seen here (an SSE answer
+			// isn't counted), and include the page's envelope.
+			for _, tool := range res.Tools {
+				b, err := json.Marshal(tool)
+
+				if err != nil {
+					return false, fmt.Errorf("measure tool list: %w", err)
+				}
+
+				size += len(b)
+			}
+
+			if size > m.maxSyncBytes {
+				return false, &syncOverflowError{kase: CaseSyncBytes, detail: fmt.Sprintf("tool definitions over %d bytes", m.maxSyncBytes)}
+			}
+
 			// The list is fresh only as long as its stalest page; a page
 			// without a hint (0) leaves the whole list without one.
 			page := time.Duration(max(res.TTLMs, 0)) * time.Millisecond
 
-			if first || page < ttl {
+			if n == 1 || page < ttl {
 				ttl = page
 			}
 
-			if res.NextCursor == "" {
+			switch {
+			case res.NextCursor == "":
 				return false, nil
+			case n == maxSyncPages:
+				return false, &syncOverflowError{kase: CaseSyncPages, detail: fmt.Sprintf("more than %d pages", maxSyncPages)}
+			case cursors[res.NextCursor]:
+				return false, &syncOverflowError{kase: CaseSyncPages, detail: fmt.Sprintf("page %d repeats a cursor", n)}
 			}
 
+			cursors[res.NextCursor] = true
 			params.Cursor = res.NextCursor
 		}
 	})
@@ -296,7 +335,9 @@ func (m *Manager) use(ctx context.Context, name string, f func(context.Context, 
 	defer l.release()
 
 	declined, err := f(ctx, l.session)
-	v := judge(contextOutcome(ctx, outcome{connector: name, phase: phaseUse, err: err, declined: declined, mask: l.mask}))
+	v := judge(contextOutcome(ctx, outcome{
+		connector: name, phase: phaseUse, err: err, declined: declined, mask: l.mask, overflow: l.overflow.seen(),
+	}))
 
 	// The close a verdict calls for still tries its DELETE when the use's
 	// ctx has ended, often why the use failed.

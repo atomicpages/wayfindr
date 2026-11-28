@@ -40,6 +40,9 @@ type dialed struct {
 	// to come (see haltTransport); the session's close calls it. A no-op
 	// for stdio. Idempotent.
 	halt func()
+	// overflow records a message transport or fallback cut off for being
+	// over the limit (see limitTransport and lineLimitReader).
+	overflow *overflow
 	// mask replaces each value the connector's references resolved to (its
 	// url, headers, args, and env) with the reference, in error and log
 	// text: a value can sit where URLQueries doesn't look, such as a url's
@@ -117,7 +120,8 @@ func (m *Manager) dialStdio(ctx context.Context, name string, c config.Connector
 	// Wait (and so closing the session) waits for stderr to be drained. A
 	// grandchild that keeps the pipe open must not hang Close forever.
 	cmd.WaitDelay = stderrWaitDelay
-	d.transport = &stdioTransport{cmd: cmd, log: log}
+	d.overflow = &overflow{}
+	d.transport = &stdioTransport{cmd: cmd, log: log, limit: m.maxMessage, overflow: d.overflow}
 	d.halt = func() {}
 
 	return d, nil
@@ -162,8 +166,8 @@ func (w stderrLog) Write(p []byte) (int, error) {
 }
 
 // dialHTTP builds a url connector's transport. Its http.Client wraps the
-// base transport with, in order, the header injector and the auth hook
-// (design §7.2).
+// base transport with, in order, the origin guard, the header injector,
+// the auth hook, the message limit, and the halt transport (design §7.2).
 //
 // sse says to use HTTP+SSE: the config forces it, or an earlier connect fell
 // back to it. Otherwise the transport is Streamable HTTP, with an SSE
@@ -215,21 +219,32 @@ func (m *Manager) dialHTTP(ctx context.Context, c config.Connector, sse bool) (d
 		rt = m.authTransport(c, rt)
 	}
 
+	// Around everything that reads a body for itself, so it bounds only
+	// what the SDK reads.
+	d.overflow = &overflow{}
+	rt = &limitTransport{base: rt, limit: m.maxMessage, overflow: d.overflow}
+
 	// Outermost, so a halt also ends the auth hook's own requests, such as
 	// a token refresh.
 	halted := make(chan struct{})
 	d.halt = sync.OnceFunc(func() { close(halted) })
 	rt = &haltTransport{base: rt, session: halted, manager: m.halted}
 
+	// Each SSE event is bounded like any other message; set here, so the
+	// bound doesn't rest on the SDK's default.
+	sseTransport := &mcp.SSEClientTransport{Endpoint: endpoint, HTTPClient: &http.Client{Transport: rt}, MaxEventSize: m.maxMessage}
+
 	if sse || c.Transport == config.TransportSSE {
-		d.transport = &mcp.SSEClientTransport{Endpoint: endpoint, HTTPClient: &http.Client{Transport: rt}}
+		d.transport = sseTransport
 
 		return d, nil
 	}
 
 	d.probe = &probeTransport{base: rt}
-	d.transport = &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: &http.Client{Transport: d.probe}}
-	d.fallback = &mcp.SSEClientTransport{Endpoint: endpoint, HTTPClient: &http.Client{Transport: rt}}
+	d.transport = &mcp.StreamableClientTransport{
+		Endpoint: endpoint, HTTPClient: &http.Client{Transport: d.probe}, MaxEventSize: m.maxMessage,
+	}
+	d.fallback = sseTransport
 
 	return d, nil
 }
