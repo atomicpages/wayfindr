@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -29,16 +30,24 @@ type transport struct {
 	start func(t *testing.T, version string, opts ...fakeupstream.Option) mcp.Transport
 }
 
+// transports are the three ways to reach a fake upstream. Each HTTP one
+// uses its own server's client: the subtests run in parallel, and a server's
+// Close calls CloseIdleConnections on http.DefaultTransport, which would break
+// another subtest's request in flight on the shared transport.
 func transports() []transport {
 	return []transport{
 		{"stdio", func(t *testing.T, version string, opts ...fakeupstream.Option) mcp.Transport {
 			return &mcp.CommandTransport{Command: fakeupstream.StdioCommand(t, version, opts...)}
 		}},
 		{"streamable", func(t *testing.T, version string, opts ...fakeupstream.Option) mcp.Transport {
-			return &mcp.StreamableClientTransport{Endpoint: fakeupstream.StartStreamable(t, version, opts...).URL}
+			srv := fakeupstream.StartStreamable(t, version, opts...)
+
+			return &mcp.StreamableClientTransport{Endpoint: srv.URL, HTTPClient: srv.Client()}
 		}},
 		{"sse", func(t *testing.T, version string, opts ...fakeupstream.Option) mcp.Transport {
-			return &mcp.SSEClientTransport{Endpoint: fakeupstream.StartSSE(t, version, opts...).URL}
+			srv := fakeupstream.StartSSE(t, version, opts...)
+
+			return &mcp.SSEClientTransport{Endpoint: srv.URL, HTTPClient: srv.Client()}
 		}},
 	}
 }
@@ -417,13 +426,13 @@ func TestStreamableRejectsWithConfiguredStatus(t *testing.T) {
 			t.Parallel()
 			srv := fakeupstream.StartStreamable(t, v, fakeupstream.WithStreamableStatus(http.StatusNotFound))
 
-			if got := postInitialize(t, srv.URL); got != http.StatusNotFound {
+			if got := postInitialize(t, srv); got != http.StatusNotFound {
 				t.Errorf("POST status = %d, want %d", got, http.StatusNotFound)
 			}
 
 			client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0"}, nil)
 
-			if cs, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: srv.URL}, nil); err == nil {
+			if cs, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: srv.URL, HTTPClient: srv.Client()}, nil); err == nil {
 				_ = cs.Close()
 				t.Fatal("connect succeeded, want an error")
 			}
@@ -439,7 +448,7 @@ func TestSSERejectsStreamablePost(t *testing.T) {
 			t.Parallel()
 			srv := fakeupstream.StartSSE(t, v)
 
-			if got := postInitialize(t, srv.URL); got < 400 || got > 499 {
+			if got := postInitialize(t, srv); got < 400 || got > 499 {
 				t.Errorf("POST status = %d, want 4xx", got)
 			}
 		})
@@ -447,11 +456,11 @@ func TestSSERejectsStreamablePost(t *testing.T) {
 }
 
 // postInitialize sends a Streamable HTTP initialize POST and returns the
-// response status.
-func postInitialize(t *testing.T, url string) int {
+// response status. It uses srv's own client, not the shared default one.
+func postInitialize(t *testing.T, srv *httptest.Server) int {
 	t.Helper()
 	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"c","version":"v0"}}}`
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, strings.NewReader(body))
 
 	if err != nil {
 		t.Fatal(err)
@@ -459,7 +468,7 @@ func postInitialize(t *testing.T, url string) int {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := srv.Client().Do(req)
 
 	if err != nil {
 		t.Fatalf("post: %v", err)
