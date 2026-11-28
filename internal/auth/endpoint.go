@@ -9,10 +9,15 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // maxTokenResponse bounds a token endpoint response.
 const maxTokenResponse = 1 << 20
+
+// bodyTimeout bounds reading a token response once its headers have
+// arrived (see [oauthClient.exchange]): every oauthClient's bodyTimeout.
+const bodyTimeout = 10 * time.Second
 
 // endpointRequest is a request to the authorization server's token
 // endpoint before it is sent: client authentication and the sender add to
@@ -40,24 +45,63 @@ type endpointRequest struct {
 // transport failure, or a known transient code such as a rate limit, is
 // [KindUnreachable]. Neither the response body nor any token is put in an
 // error.
+//
+// ctx bounds the wait for the answer, not the reading of it: once the
+// answer has arrived the server may have issued a token, perhaps rotating
+// a refresh token, so the body is read within bodyTimeout even if ctx ends
+// meanwhile (wayfindr-1j97).
 func (oc oauthClient) exchange(ctx context.Context, form url.Values) (token, string, error) {
-	resp, err := oc.postToken(ctx, form)
+	// The request runs on a context of its own, which ctx's end cancels,
+	// with ctx's cause, until the answer arrives.
+	rctx, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
+	defer cancel(nil)
+	stop := context.AfterFunc(ctx, func() { cancel(context.Cause(ctx)) })
+	defer stop()
+
+	endpoint, grant := oc.endpoints.Token, form.Get("grant_type")
+
+	// attempt sends form unless ctx has ended. AfterFunc cancels rctx on a
+	// goroutine of its own, which may not have run yet, so attempt checks
+	// ctx itself: a request sent once ctx has ended could spend a refresh
+	// token for an answer no one reads.
+	attempt := func() (*http.Response, error) {
+		if ctx.Err() != nil {
+			cause := context.Cause(ctx)
+
+			return nil, oc.fail(transportCase(cause), grant+" grant at "+endpoint, "", cause)
+		}
+
+		return oc.postToken(rctx, form)
+	}
+
+	resp, err := attempt()
 
 	if err == nil && oc.sender.retry(resp, roleAuthorizationServer) {
 		drain(resp)
-		resp, err = oc.postToken(ctx, form)
+		resp, err = attempt()
 	}
 
 	if err != nil {
 		return token{}, "", err
 	}
 
+	// The answer has arrived: from here only bodyTimeout ends reading it.
+	// If ctx ended first, the request is already cancelled, and so is the
+	// read.
+	stop()
+	readTimer := time.AfterFunc(oc.bodyTimeout, func() { cancel(context.DeadlineExceeded) })
+	defer readTimer.Stop()
 	defer func() { _ = resp.Body.Close() }()
-	endpoint, grant := oc.endpoints.Token, form.Get("grant_type")
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTokenResponse+1))
 
 	if err != nil {
-		return token{}, "", oc.fail(CaseTransport, grant+" grant at "+endpoint+": read response", "", err)
+		err = oc.fail(CaseTransport, grant+" grant at "+endpoint+": read response", "", err)
+
+		if e, ok := AsError(err); ok {
+			e.status = resp.StatusCode // see answerUnread
+		}
+
+		return token{}, "", err
 	}
 
 	out := TokenOutcome{Case: CaseMalformedResponse}
@@ -88,6 +132,15 @@ func (oc oauthClient) exchange(ctx context.Context, form url.Values) (token, str
 	}
 
 	return tok, out.Scope, nil
+}
+
+// answerUnread reports whether err is [oauthClient.exchange]'s for a
+// success answer whose body could not be read: the server may have issued
+// a token, perhaps rotating a refresh token, that no one has.
+func answerUnread(err error) bool {
+	e, ok := AsError(err)
+
+	return ok && e.Case == CaseTransport && isSuccess(e.status)
 }
 
 // postToken sends one attempt of a token request carrying form, with the

@@ -770,9 +770,9 @@ func (d *Daemon) shutdown(ctx context.Context, served <-chan error, stopCalls, s
 	// stopGrace. When it ends, every url upstream request still in flight
 	// ends at once, a session DELETE the upstream never answers included,
 	// and so does a close waiting on a connector's lock held by one; Close
-	// returns once its closes have, so none of their requests, nor the
-	// broker's token writes on them, outlives it into the store's close
-	// (wayfindr-t08.12).
+	// returns once its closes have, so none of their requests outlives it
+	// into the store's close (wayfindr-t08.12). A token refresh one of them
+	// started may: see StopRefreshes below.
 	wait, cancel = context.WithTimeout(ctx, max(time.Until(deadline), stopGrace))
 
 	if err := d.manager.Close(wait); err != nil {
@@ -780,6 +780,11 @@ func (d *Daemon) shutdown(ctx context.Context, served <-chan error, stopCalls, s
 	}
 
 	cancel()
+	// The broker's refreshes next: no upstream request is left to start
+	// one, but a refresh is detached from the request that started it and
+	// may still be storing a rotated refresh token, which must land before
+	// the store closes (wayfindr-1j97).
+	d.broker.StopRefreshes()
 	// The call log last before the store: no request is left to record a
 	// call, and the writer stores what is queued. The same holds for the
 	// client tokens' last uses.

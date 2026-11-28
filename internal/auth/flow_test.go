@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -64,7 +65,13 @@ func consent(t *testing.T, authorizeURL string) *url.URL {
 // returns the status and page.
 func (h *brokerHarness) callback(t *testing.T, u *url.URL) (int, string) {
 	t.Helper()
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, u.String(), nil)
+
+	return h.callbackCtx(t.Context(), u)
+}
+
+// callbackCtx is callback for a browser request whose context is ctx.
+func (h *brokerHarness) callbackCtx(ctx context.Context, u *url.URL) (int, string) {
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	rec := httptest.NewRecorder()
 	h.flows().HandleCallback(rec, req)
 
@@ -185,6 +192,33 @@ func TestFlowStoresTheTokenAndTheConnectorIsAuthorized(t *testing.T) {
 		if strings.Contains(h.logs.String(), secret) {
 			t.Errorf("the log contains %q", secret)
 		}
+	}
+}
+
+// A callback whose request has already ended exchanges no code: sent, the
+// token request could be answered with a token no one reads. Token
+// requests are counted where they leave Wayfindr, before net/http, which
+// does not promise to refuse a request whose context has ended
+// (wayfindr-1j97).
+func TestCallbackSendsNothingOnceItsRequestHasEnded(t *testing.T) {
+	h := newBrokerHarness(t)
+	var sent atomic.Int64
+
+	hookTokenEndpoint(h, func(r *http.Request) (*http.Response, error) {
+		sent.Add(1)
+
+		return http.DefaultTransport.RoundTrip(r)
+	})
+	f := h.start(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if status, page := h.callbackCtx(ctx, consent(t, f.AuthorizeURL)); status == http.StatusOK {
+		t.Fatalf("callback with an ended request = %d %q, want a failure", status, page)
+	}
+
+	if n := sent.Load(); n != 0 {
+		t.Errorf("token requests sent = %d after the callback's request ended, want 0", n)
 	}
 }
 

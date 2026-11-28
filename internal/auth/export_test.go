@@ -38,6 +38,19 @@ func SetPollSleep(b *Broker, sleep func(ctx context.Context, d time.Duration) er
 	b.sleep = sleep
 }
 
+// SetRefreshTimeout replaces how long one refresh flight may take, so tests
+// reach its deadline quickly. Set it before any refresh.
+func SetRefreshTimeout(b *Broker, d time.Duration) {
+	b.refreshTimeout = d
+}
+
+// SetBodyTimeout replaces how long reading a token response may take once
+// it has arrived, so tests reach its end quickly. Set it before any token
+// request.
+func SetBodyTimeout(b *Broker, d time.Duration) {
+	b.bodyTimeout = d
+}
+
 // NewRegistrar returns a Registrar of userID's credentials in st, sealed by
 // sealer, for tests of the client choice an auth flow makes, without a
 // Broker. It has its own credentials module, and so its own row lock.

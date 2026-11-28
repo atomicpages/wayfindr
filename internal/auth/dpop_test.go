@@ -1,8 +1,10 @@
 package auth_test
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -231,6 +233,38 @@ func TestDPoPNoncesOfEachRoleOnOneOrigin(t *testing.T) {
 
 	if diff := cmp.Diff(want, nonces); diff != "" {
 		t.Errorf("resource proof nonces (-want +got):\n%s", diff)
+	}
+}
+
+// A token request answered with use_dpop_nonce is not sent again once its
+// ctx has ended: the resend could be answered with a token no one reads.
+// The callback's request ends as the first answer arrives. Token requests
+// are counted where they leave Wayfindr, before net/http, which does not
+// promise to refuse a request whose context has ended (wayfindr-1j97).
+func TestDPoPNonceResendIsNotSentOnceTheRequestHasEnded(t *testing.T) {
+	h := newDPoPHarness(t, config.DPoPAuto, fakeas.WithDPoP(true))
+	ctx, cancel := context.WithCancel(t.Context())
+	var sent atomic.Int64
+
+	hookTokenEndpoint(h, func(r *http.Request) (*http.Response, error) {
+		sent.Add(1)
+		resp, err := http.DefaultTransport.RoundTrip(r)
+		cancel()
+
+		return resp, err
+	})
+	f := h.start(t)
+
+	if status, page := h.callbackCtx(ctx, consent(t, f.AuthorizeURL)); status == http.StatusOK {
+		t.Fatalf("callback = %d %q, want a failure", status, page)
+	}
+
+	if diff := cmp.Diff([]string{"use_dpop_nonce"}, h.codeExchanges()); diff != "" {
+		t.Errorf("code exchanges (-want +got):\n%s", diff)
+	}
+
+	if n := sent.Load(); n != 1 {
+		t.Errorf("token requests sent = %d, want 1: the resend's ctx had ended", n)
 	}
 }
 

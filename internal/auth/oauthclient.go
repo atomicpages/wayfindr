@@ -41,6 +41,9 @@ type oauthClient struct {
 	now func() time.Time
 	// link is the connector's auth link, for needs_auth errors.
 	link string
+	// bodyTimeout bounds reading a token response once it has arrived: the
+	// broker's bodyTimeout.
+	bodyTimeout time.Duration
 }
 
 // oauthClient returns the OAuth client of connector c, whose discovery is
@@ -82,6 +85,7 @@ func (b *Broker) oauthClient(c config.Connector, hc *http.Client, disc Discovery
 		inspectors:   b.inspectors,
 		now:          b.now,
 		link:         link,
+		bodyTimeout:  b.bodyTimeout,
 	}
 }
 

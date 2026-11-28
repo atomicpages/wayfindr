@@ -23,6 +23,13 @@ const refreshWindow = 60 * time.Second
 // lose the credential.
 const refreshTimeout = 30 * time.Second
 
+// storeTimeout bounds storing a refreshed token. The store runs on a
+// context of its own: once the authorization server has answered it may
+// have spent the old refresh token, and only the stored answer holds the
+// new one, so the store does not inherit what is left of refreshTimeout
+// (wayfindr-1j97).
+const storeTimeout = 10 * time.Second
+
 // expiring reports whether tok must be refreshed before use.
 func (b *Broker) expiring(tok token) bool {
 	return !tok.Expiry.IsZero() && b.now().Add(refreshWindow).After(tok.Expiry)
@@ -53,7 +60,12 @@ func (b *Broker) refresh(ctx context.Context, req refreshRequest) (token, error)
 	// of its own.
 	for range 2 {
 		ch := b.flights.DoChan(key, func() (any, error) {
-			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refreshTimeout)
+			if !b.startRefresh() {
+				return token{}, b.fail(CaseStore, req.conn.Name, "the daemon is stopping; no refresh starts", "", nil)
+			}
+
+			defer b.refreshes.Done()
+			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), b.refreshTimeout)
 			defer cancel()
 
 			return b.refreshOnce(fctx, req)
@@ -83,6 +95,10 @@ func (b *Broker) refresh(ctx context.Context, req refreshRequest) (token, error)
 // refreshOnce is the body of a refresh flight.
 func (b *Broker) refreshOnce(ctx context.Context, req refreshRequest) (token, error) {
 	name := req.conn.Name
+	// Wall-clock, so a refresh that a laptop slept through shows it: Go's
+	// monotonic clock stops during sleep on macOS.
+	start := b.now().Round(0)
+	elapsed := func() int64 { return b.now().Round(0).Sub(start).Milliseconds() }
 	v, err := b.load(ctx, name, req.resource, *req.conn.Auth)
 
 	if err != nil {
@@ -138,23 +154,50 @@ func (b *Broker) refreshOnce(ctx context.Context, req refreshRequest) (token, er
 		return token{}, b.withLink(err)
 	}
 
-	fresh, scope, err := redeem(ctx, b.oauthClient(req.conn, hc, disc, client, tok.DPoPKey), a, tok, req.resource)
+	// Once the daemon is stopping, the refresh token is not spent: a kill
+	// could land between the server rotating it and the answer being
+	// stored, and unspent it serves the next start.
+	if b.stoppingRefreshes() {
+		return token{}, b.fail(CaseStore, name, "the daemon is stopping; the refresh token is kept for the next start", "", nil)
+	}
+
+	// The token request gets a budget of its own: discovery and the client
+	// lookup may have spent most of ctx's, and a request sent with little
+	// time left could spend the refresh token for an answer that comes too
+	// late to read (wayfindr-1j97).
+	rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), b.refreshTimeout)
+	defer rcancel()
+	fresh, scope, err := redeem(rctx, b.oauthClient(req.conn, hc, disc, client, tok.DPoPKey), a, tok, req.resource)
+
+	// What follows the answer runs under storeTimeout of its own: the
+	// server may have rotated the refresh token, and only the stored answer
+	// holds the new one.
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), storeTimeout)
+	defer cancel()
 
 	if err != nil {
-		err = b.forgetRejectedDCR(ctx, name, client, v, err)
+		err = b.forgetRejectedDCR(sctx, name, client, v, err)
 
 		if errors.Is(err, errTokenReplaced) {
-			return b.replaced(ctx, req, disc)
+			return b.replaced(sctx, req, disc)
 		}
 
-		ev := b.log.Warn().Str("connector", name).Str("issuer", redact.URL(disc.Issuer)).
-			Str("grant_type", "refresh_token").Str("outcome", outcome(err))
+		ev, msg := b.log.Warn(), "oauth token refresh failed"
+
+		// A success answer that could not be read is lost as a store
+		// failure is: the server may have rotated the refresh token.
+		if answerUnread(err) {
+			ev, msg = b.log.Error(), "oauth token refresh lost"
+		}
+
+		ev = ev.Str("connector", name).Str("issuer", redact.URL(disc.Issuer)).
+			Str("grant_type", "refresh_token").Str("outcome", outcome(err)).Int64("duration_ms", elapsed())
 
 		if e, ok := AsError(err); ok {
 			ev = ev.Str("case", string(e.Case)).Str("provider_code", e.ProviderCode)
 		}
 
-		ev.Msg("oauth token refresh failed")
+		ev.Msg(msg)
 
 		return token{}, err
 	}
@@ -167,21 +210,32 @@ func (b *Broker) refreshOnce(ctx context.Context, req refreshRequest) (token, er
 	// left no row, and the call fails no_credential; a new grant meanwhile
 	// is the credential now, and the call uses its token. Either way the
 	// refreshed token is dropped.
-	err = b.withLink(b.creds.renew(ctx, name, v, fresh, client.ClientID, scope))
+	err = b.withLink(b.creds.renew(sctx, name, v, fresh, client.ClientID, scope))
 
 	if errors.Is(err, errTokenReplaced) {
-		return b.replaced(ctx, req, disc)
+		return b.replaced(sctx, req, disc)
 	}
 
 	if err != nil {
-		b.log.Info().Str("connector", name).Str("issuer", redact.URL(disc.Issuer)).
-			Str("grant_type", "refresh_token").Str("outcome", outcome(err)).Msg("oauth token refresh discarded")
+		// The answer is lost: if the server rotated, the grant is gone. The
+		// event is logged here; the error itself is returned, not logged. A
+		// revoke meanwhile (no_credential) loses nothing the user kept.
+		ev, msg := b.log.Error(), "oauth token refresh lost"
+
+		if e, ok := AsError(err); ok && e.Case == CaseNoCredential {
+			ev, msg = b.log.Info(), "oauth token refresh discarded"
+		}
+
+		ev.Str("connector", name).Str("issuer", redact.URL(disc.Issuer)).
+			Str("grant_type", "refresh_token").Str("outcome", outcome(err)).Int64("duration_ms", elapsed()).
+			Msg(msg)
 
 		return token{}, err
 	}
 
 	b.log.Info().Str("connector", name).Str("issuer", redact.URL(disc.Issuer)).
-		Str("grant_type", "refresh_token").Str("outcome", "ok").Msg("oauth token refreshed")
+		Str("grant_type", "refresh_token").Str("outcome", "ok").Int64("duration_ms", elapsed()).
+		Msg("oauth token refreshed")
 
 	return fresh, nil
 }

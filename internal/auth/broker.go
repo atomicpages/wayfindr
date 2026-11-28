@@ -89,12 +89,24 @@ type Broker struct {
 	// sleep waits between a device code flow's polls; tests replace it
 	// (see export_test.go).
 	sleep func(ctx context.Context, d time.Duration) error
+	// refreshTimeout bounds one refresh flight: the const refreshTimeout,
+	// which tests shorten (see export_test.go).
+	refreshTimeout time.Duration
+	// bodyTimeout bounds reading a token response: the const bodyTimeout,
+	// which tests shorten (see export_test.go).
+	bodyTimeout time.Duration
 	// pollers are the running device code pollers, which Close waits for.
 	pollers sync.WaitGroup
-	// mu guards closed.
+	// refreshes are the running refresh flights, which StopRefreshes waits
+	// for.
+	refreshes sync.WaitGroup
+	// mu guards closed and refreshesStopped.
 	mu sync.Mutex
 	// closed is set by Close: no poller starts from then on.
 	closed bool
+	// refreshesStopped is set by StopRefreshes: no refresh flight starts
+	// from then on.
+	refreshesStopped bool
 }
 
 // NewBroker returns a Broker configured by o.
@@ -114,6 +126,8 @@ func NewBroker(o BrokerOptions) *Broker {
 		nonces:     newNonceCache(),
 		creds:      &credentials{store: o.Store, sealer: o.Sealer, userID: o.UserID},
 
+		refreshTimeout:      refreshTimeout,
+		bodyTimeout:         bodyTimeout,
 		onCredentialChanged: o.OnCredentialChanged,
 	}
 
@@ -149,6 +163,46 @@ func (b *Broker) Close() {
 		return b.fail(CaseFlowCancelled, f.Connector, "the daemon is stopping", "", nil)
 	})
 	b.pollers.Wait()
+}
+
+// StopRefreshes stops any refresh from starting and waits for the ones
+// running, so none writes to the store after it returns. A refresh is
+// detached from its caller, so it can outlive the upstream request that
+// started it (wayfindr-1j97). The daemon calls it at shutdown once no
+// upstream request is left, before it closes the store. A running refresh
+// still in discovery ends there, within refreshTimeout, without sending its
+// token request; one whose request is out is waited for: refreshTimeout for
+// the answer, bodyTimeout to read it, storeTimeout to store it, about 50s
+// in all.
+func (b *Broker) StopRefreshes() {
+	b.mu.Lock()
+	b.refreshesStopped = true
+	b.mu.Unlock()
+	b.refreshes.Wait()
+}
+
+// stoppingRefreshes reports whether StopRefreshes has begun.
+func (b *Broker) stoppingRefreshes() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.refreshesStopped
+}
+
+// startRefresh counts a refresh flight about to run, or reports false once
+// StopRefreshes has begun. The count is taken under mu, before
+// refreshesStopped is set, so it never races StopRefreshes' wait.
+func (b *Broker) startRefresh() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.refreshesStopped {
+		return false
+	}
+
+	b.refreshes.Add(1)
+
+	return true
 }
 
 // startPoller runs poll on a goroutine of its own, the one poller of
