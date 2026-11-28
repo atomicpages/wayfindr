@@ -36,6 +36,10 @@ Recording a call must not slow it down or make it fail.
   message Wayfindr returned. It is kept on one line, with control characters
   replaced, URL query strings masked, and at most 500 bytes. An `ok` or
   `input_required` call stores none.
+- A call that returned a result also records its size in bytes, the length of
+  the result's JSON encoding, in `result_bytes` (amended 2026-11-25,
+  wayfindr-690r). The size is metadata, so the result itself is still not
+  stored.
 - The client is the `clientInfo` name the client asserts. The stdio shim
   forwards its own client's name. A `token_name` column holds the name of the
   client token the daemon verified, `default` or a scoped token's name, never a

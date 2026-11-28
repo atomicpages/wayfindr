@@ -19,7 +19,11 @@ import (
 
 func millis(n int64) *int64 { return &n }
 
+// ptr is a pointer to n, for the byte counts.
+func ptr(n int64) *int64 { return &n }
+
 // sampleCalls is every way a row renders: ok in milliseconds and seconds,
+// a result in bytes, KiB, and MiB, or of no known size,
 // the default and a scoped token or none, no client, a refusal with a Case and error text, a tool error's
 // text, a failure with only a Kind, and names
 // the agent wrote without a connector or at all.
@@ -27,9 +31,11 @@ func sampleCalls() admin.Calls {
 	at := time.Date(2026, 11, 8, 9, 14, 2, 0, time.UTC)
 
 	return admin.Calls{Retention: "720h0m0s", Calls: []admin.Call{
-		{StartedAt: at, Client: "claude-code", TokenName: "default", Connector: "linear", Tool: "create_issue", DurationMS: millis(412), Result: store.CallOK},
+		{StartedAt: at, Client: "claude-code", TokenName: "default", Connector: "linear", Tool: "create_issue", DurationMS: millis(412), Result: store.CallOK, ResultBytes: ptr(312)},
 		{StartedAt: at.Add(-22 * time.Second), Client: "claude-code", TokenName: "default", Connector: "linear", Tool: "search_issues",
-			DurationMS: millis(1234), Result: store.CallToolError, Error: "Unknown filter: state=opne"},
+			DurationMS: millis(1234), Result: store.CallToolError, Error: "Unknown filter: state=opne", ResultBytes: ptr(48 * 1024)},
+		{StartedAt: at.Add(-30 * time.Second), Client: "claude-code", TokenName: "default", Connector: "linear", Tool: "list_issues",
+			DurationMS: millis(2310), Result: store.CallOK, ResultBytes: ptr(1_258_291)},
 		{StartedAt: at.Add(-111 * time.Second), Connector: "github", Tool: "get_file", Result: store.CallRejected,
 			Kind: "invalid_arguments", Case: "schema_mismatch", Error: "The arguments do not match github.get_file's inputSchema. To fix: Fix the arguments and call again."},
 		{StartedAt: at.Add(-19 * time.Minute), Client: "cursor", TokenName: "nightly-triage", Connector: "slack", Tool: "post_message",
@@ -144,7 +150,7 @@ func TestCallsPrintsTheTableAndJSON(t *testing.T) {
 	at := time.Date(2026, 11, 8, 9, 14, 2, 0, time.UTC)
 	ms := 412 * time.Millisecond
 	st := &fakeStore{calls: []store.Call{{Client: "claude-code", TokenName: "default", Connector: "linear", Tool: "create_issue",
-		StartedAt: at, Duration: &ms, Result: store.CallOK}}}
+		StartedAt: at, Duration: &ms, Result: store.CallOK, ResultBytes: ptr(312)}}}
 	host := callsDaemon(t, st, 720*time.Hour)
 	var stdout, stderr bytes.Buffer
 
@@ -152,8 +158,8 @@ func TestCallsPrintsTheTableAndJSON(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0; stderr: %s", code, stderr.String())
 	}
 
-	want := "TIME                  CLIENT       TOKEN    TOOL                 DURATION  RESULT\n" +
-		"2026-11-08T09:14:02Z  claude-code  default  linear.create_issue  412ms     ok\n"
+	want := "TIME                  CLIENT       TOKEN    TOOL                 DURATION  RESULT  SIZE\n" +
+		"2026-11-08T09:14:02Z  claude-code  default  linear.create_issue  412ms     ok      312 B\n"
 
 	if diff := cmp.Diff(want, stdout.String()); diff != "" {
 		t.Errorf("stdout (-want +got):\n%s", diff)
@@ -171,8 +177,9 @@ func TestCallsPrintsTheTableAndJSON(t *testing.T) {
 		t.Fatalf("stdout is not a Calls: %v\n%s", err, stdout.String())
 	}
 
-	if got.Retention != "720h0m0s" || len(got.Calls) != 1 || got.Calls[0].Tool != "create_issue" || got.Calls[0].TokenName != "default" {
-		t.Errorf("--json = %+v, want the retention and the one call, with its token", got)
+	if got.Retention != "720h0m0s" || len(got.Calls) != 1 || got.Calls[0].Tool != "create_issue" || got.Calls[0].TokenName != "default" ||
+		got.Calls[0].ResultBytes == nil || *got.Calls[0].ResultBytes != 312 {
+		t.Errorf("--json = %+v, want the retention and the one call, with its token and its size", got)
 	}
 }
 

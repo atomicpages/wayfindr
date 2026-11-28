@@ -115,7 +115,8 @@ CREATE TABLE calls (                    -- the call log: one row per call_tool c
   error_kind  TEXT,
   error_case  TEXT,
   token_name  TEXT,                       -- 'default' or a scoped token's name (added by 0004)
-  error_text  TEXT                        -- the error the agent got back; NULL when ok (added by 0006)
+  error_text  TEXT,                       -- the error the agent got back; NULL when ok (added by 0006)
+  result_bytes INTEGER                    -- size of the result the agent got back; NULL when none (added by 0009)
 );
 
 CREATE INDEX calls_user_started ON calls (user_id, started_at DESC, id DESC);
@@ -178,6 +179,15 @@ CREATE INDEX calls_user_started ON calls (user_id, started_at DESC, id DESC);
   and `input_required` calls and for rows logged before the migration (SQLite
   `0006_call_error_text.sql`, Postgres `0010_call_error_text.sql`). The
   retention prune deletes it with its row.
+- **`calls.result_bytes`** (wayfindr-690r) is the size of the result the agent
+  got back: the length of its JSON encoding, `structuredContent` included, as
+  the gateway measured it ([§7.6](7.6-gateway.md)). It is metadata, never the
+  result, so ADR 0014's rule that results are not stored holds. `bigint` in
+  Postgres. NULL when no upstream result came back (a `rejected` or `failed`
+  call), for `input_required` calls, and for rows logged before the migration;
+  there is no backfill. A `tool_error` result is measured. SQLite
+  `0009_call_result_bytes.sql`, Postgres `0013_call_result_bytes.sql`. The
+  retention prune deletes it with its row.
 - **The call log** never stores arguments or results, only the error text above.
   `connector` and `tool` are the qualified name as the agent wrote it, split at
   the first dot, clipped to 256 bytes and made printable (`redact.Printable`),
@@ -211,6 +221,8 @@ CREATE INDEX calls_user_started ON calls (user_id, started_at DESC, id DESC);
   | `0005_credential_client_id`           | `0009_credential_client_id`                   |
   | `0006_call_error_text`                | `0010_call_error_text`                        |
   | `0007_client_token_remote`            | `0011_client_token_remote`                    |
+  | `0008_oauth`                          | `0012_oauth`                                  |
+  | `0009_call_result_bytes`              | `0013_call_result_bytes`                      |
 
 - **SQLite settings.** WAL, `busy_timeout=5000`, `foreign_keys=ON`. The daemon
   is the only writer ([§9](9-security.md)).

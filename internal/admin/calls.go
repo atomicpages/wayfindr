@@ -40,7 +40,8 @@ type Calls struct {
 }
 
 // Call is one row of the call log. It never holds the call's arguments or
-// result, only the error text of one that is not ok.
+// result, only the size of the result and the error text of a call that is
+// not ok.
 type Call struct {
 	// StartedAt is when the call arrived, in UTC.
 	StartedAt time.Time `json:"started_at"`
@@ -58,6 +59,11 @@ type Call struct {
 	// connecting included; absent when the call never reached that point.
 	DurationMS *int64           `json:"duration_ms,omitempty"`
 	Result     store.CallResult `json:"result"`
+	// ResultBytes is the size of the result the agent got back: the length
+	// of its JSON encoding, content and structuredContent included. Absent
+	// when no upstream result came back (a refusal, a failure), for an
+	// input_required call, and for calls logged before it was recorded.
+	ResultBytes *int64 `json:"result_bytes,omitempty"`
 	// Kind and Case say why a call that is not ok ended as it did, in the
 	// gateway's or the upstream's vocabulary; absent when not known.
 	Kind string `json:"kind,omitempty"`
@@ -112,6 +118,8 @@ func (a api) calls(w http.ResponseWriter, r *http.Request) {
 			Kind:      c.ErrorKind,
 			Case:      c.ErrorCase,
 			Error:     c.ErrorText,
+
+			ResultBytes: c.ResultBytes,
 		}
 
 		if c.Duration != nil {

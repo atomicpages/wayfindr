@@ -297,8 +297,9 @@ Log files Wayfindr creates are mode 0600.
 The daemon keeps a row for every `call_tool` call, which
 [`wayfindr calls`](/reference/cli#wayfindr-calls) shows: when it arrived, which
 client token it used, the client's name, the tool name as the agent wrote it,
-how long the upstream took, and the result. It never stores the call's arguments
-or the upstream's result, so what an agent sent or read stays out of it. The one
+how long the upstream took, the result, and the size of the upstream's result. It
+never stores the call's arguments or the upstream's result, so what an agent sent
+or read stays out of it. The one
 exception is a call that didn't end `ok`: it keeps the error text the agent got
 back, on one line, cut to 500 bytes, with URL query strings masked. An
 upstream's error can quote what the agent sent, such as a search query, and it

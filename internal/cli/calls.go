@@ -183,24 +183,35 @@ func writeCallsTable(w io.Writer, res admin.Calls) error {
 		b.WriteString("No calls match.\n")
 	} else {
 		tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-		rows := []string{"TIME\tCLIENT\tTOKEN\tTOOL\tDURATION\tRESULT"}
+		rows := []string{"TIME\tCLIENT\tTOKEN\tTOOL\tDURATION\tRESULT\tSIZE"}
 
 		for _, c := range res.Calls {
 			rows = append(rows, strings.Join([]string{
-				formatTime(c.StartedAt), orDash(c.Client), orDash(c.TokenName), callTool(c), callDuration(c.DurationMS), callResult(c),
+				formatTime(c.StartedAt), orDash(c.Client), orDash(c.TokenName), callTool(c), callDuration(c.DurationMS), callResult(c), callSize(c.ResultBytes),
 			}, "\t"))
-
-			// Under the result, after an empty cell per column so the
-			// columns stay aligned: the last cell sets no width. The daemon
-			// stores the text printable and on one line.
-			if c.Error != "" {
-				rows = append(rows, "\t\t\t\t\t"+c.Error)
-			}
 		}
 
 		// A tabwriter over a bytes.Buffer cannot fail.
 		_, _ = io.WriteString(tw, strings.Join(rows, "\n")+"\n")
 		_ = tw.Flush()
+
+		// A call that is not ok is followed by its error text, under the
+		// result. It is added after the table is laid out: a row with fewer
+		// cells would break the RESULT and SIZE columns into blocks that
+		// each align on their own. The header is ASCII, so the offset of
+		// RESULT in it is the indent, in characters. The daemon stores the
+		// text printable and on one line.
+		lines := strings.SplitAfter(b.String(), "\n")
+		indent := strings.Repeat(" ", strings.Index(lines[0], "RESULT"))
+		b.Reset()
+
+		for i, line := range lines {
+			b.WriteString(line)
+
+			if i > 0 && i <= len(res.Calls) && res.Calls[i-1].Error != "" {
+				b.WriteString(indent + res.Calls[i-1].Error + "\n")
+			}
+		}
 	}
 
 	if res.Retention == "0s" {
@@ -240,6 +251,15 @@ func callDuration(ms *int64) string {
 	default:
 		return fmt.Sprintf("%.1fs", float64(*ms)/1000)
 	}
+}
+
+// callSize is the size of the result, or a dash when it is not known.
+func callSize(n *int64) string {
+	if n == nil {
+		return "-"
+	}
+
+	return admin.FormatBytes(*n)
 }
 
 // callResult is the result, followed for a call that is not ok by its

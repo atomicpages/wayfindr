@@ -112,12 +112,21 @@ func TestCallToolAsksANewClientAndCompletesWithItsAnswer(t *testing.T) {
 
 			var results []store.CallResult
 
-			for _, c := range rec.take() {
+			logged := rec.take()
+
+			for _, c := range logged {
 				results = append(results, c.Result)
 			}
 
 			if diff := cmp.Diff([]store.CallResult{store.CallInputRequired, store.CallOK}, results); diff != "" {
 				t.Errorf("call log results (-want +got):\n%s", diff)
+			}
+
+			// Only the result that ended the call is measured, not the
+			// question that came before it.
+			if len(logged) == 2 && (logged[0].ResultBytes != nil || logged[1].ResultBytes == nil || *logged[1].ResultBytes <= 0) {
+				t.Errorf("ResultBytes = %v then %v, want none for input_required, then the size of the answer",
+					logged[0].ResultBytes, logged[1].ResultBytes)
 			}
 		})
 	}

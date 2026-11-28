@@ -27,10 +27,11 @@ func durationMS(n int64) *time.Duration {
 // oldest first: an ok call, a rejected one, and a failed one.
 func recordFixtureCalls(t *testing.T, st store.Store, user string, base time.Time) {
 	t.Helper()
+	resultBytes := int64(312)
 
 	for _, c := range []store.Call{
 		{UserID: user, Client: "claude-code", TokenName: "default", Connector: "linear", Tool: "create_issue",
-			StartedAt: base, Duration: durationMS(412), Result: store.CallOK},
+			StartedAt: base, Duration: durationMS(412), Result: store.CallOK, ResultBytes: &resultBytes},
 		{UserID: user, Connector: "github", Tool: "get_file", StartedAt: base.Add(time.Minute),
 			Result: store.CallRejected, ErrorKind: "invalid_arguments", ErrorCase: "schema_mismatch"},
 		{UserID: user, Client: "cursor", TokenName: "nightly-triage", Connector: "slack", Tool: "post_message", StartedAt: base.Add(2 * time.Minute),

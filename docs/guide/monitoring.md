@@ -58,8 +58,9 @@ wayfindr status --check > /dev/null || echo "wayfindr needs attention"
 
 The daemon records every `call_tool` call in its call log: when it arrived,
 which client and client token made it, which tool, how long the upstream took,
-and how it ended. A call that didn't end `ok` also keeps the error the agent got
-back, shown under its row. Arguments and results are never stored.
+how it ended, and how big the result was. A call that didn't end `ok` also keeps
+the error the agent got back, shown under its row. Arguments and results are
+never stored, only the result's size.
 
 ```sh
 wayfindr calls                            # the last 50 calls in 24 hours
@@ -69,10 +70,11 @@ wayfindr calls --connector github --json  # one connector, as JSON
 ```
 
 ```text
-TIME                  CLIENT       TOKEN           TOOL                  DURATION  RESULT
-2026-11-08T09:14:02Z  claude-code  default         linear.create_issue   412ms     ok
-2026-11-08T09:13:40Z  claude-code  default         linear.search_issues  1.2s      tool_error
+TIME                  CLIENT       TOKEN           TOOL                  DURATION  RESULT      SIZE
+2026-11-08T09:14:02Z  claude-code  default         linear.create_issue   412ms     ok          312 B
+2026-11-08T09:13:40Z  claude-code  default         linear.search_issues  1.2s      tool_error  48 KiB
                                                                                    Unknown filter: state=opne
+2026-11-08T09:13:32Z  claude-code  default         linear.list_issues    2.3s      ok          1.2 MiB
 ```
 
 A `rejected` call never reached the upstream: the agent guessed a tool name that
@@ -82,6 +84,14 @@ hides. A `failed` call did reach it, or tried to, and the reason says why. The
 client shows as `-` when it didn't send its name. The token is `default` or the
 name of a [scoped client token](./access/scoped-tokens); the client can't choose
 it.
+
+SIZE is the length of the result's JSON encoding, so it shows which tools return
+the most. The client receives a few bytes more, since the protocol adds its own
+envelope around the result. It is `-` for a call that returned no result, such
+as one that was `rejected` or `failed`, for an `input_required` call, and for
+calls logged before sizes were recorded. Add
+`--json` to get the exact byte count as `result_bytes`. The
+[console's Calls page](./console) shows the same column.
 
 `calls` lists at most 50 calls, newest first, and doesn't say when there are
 more. Raise `--limit` up to 1000. `--since` takes days, hours, minutes, or

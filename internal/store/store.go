@@ -379,6 +379,12 @@ type Call struct {
 	// message otherwise. The gateway cleans and clips it (design §7.6);
 	// empty for ok and input_required calls, or when unknown.
 	ErrorText string
+	// ResultBytes is the size of the result the agent got back: the length
+	// of its JSON encoding, content and structuredContent included. It is
+	// metadata, never the result. Nil when no upstream result came back (a
+	// refusal, a failure), for an input_required call, and for calls logged
+	// before the column.
+	ResultBytes *int64
 }
 
 // ClientToken is a scoped client token (GLOSSARY: Client token): a name

@@ -505,11 +505,14 @@ type richAdmin struct{ fakeAdmin }
 
 func (*richAdmin) Calls(context.Context, admin.CallsQuery) (admin.Calls, error) {
 	ms := int64(812)
+	small, kib, mib := int64(312), int64(48*1024), int64(1_258_291)
 
 	return admin.Calls{Retention: "720h0m0s", Calls: []admin.Call{
-		{StartedAt: time.Date(2026, 11, 12, 9, 30, 0, 0, time.UTC), TokenName: "default", Connector: "github", Tool: "create_issue", DurationMS: &ms, Result: "ok"},
+		{StartedAt: time.Date(2026, 11, 12, 9, 30, 0, 0, time.UTC), TokenName: "default", Connector: "github", Tool: "create_issue", DurationMS: &ms, Result: "ok", ResultBytes: &mib},
 		{StartedAt: time.Date(2026, 11, 11, 9, 30, 0, 0, time.UTC), Connector: "jira", Tool: "create_issue", Result: "failed", Case: "unauthorized",
 			Error: "jira needs you to <b>sign in</b>."},
+		{StartedAt: time.Date(2026, 11, 10, 9, 30, 0, 0, time.UTC), Connector: "github", Tool: "get_issue", Result: "ok", ResultBytes: &small},
+		{StartedAt: time.Date(2026, 11, 9, 9, 30, 0, 0, time.UTC), Connector: "github", Tool: "list_issues", Result: "tool_error", ResultBytes: &kib},
 	}}, nil
 }
 
@@ -565,7 +568,7 @@ func TestPagesRender(t *testing.T) {
 			// one without a definition has no row to open.
 			`<summary aria-controls="spec-0">get_issue`, `<tr class="why-row" id="spec-0">`, "\n  &#34;inputSchema&#34;: {\n    &#34;type&#34;: &#34;object&#34;",
 			"&lt;b&gt;Get&lt;/b&gt; an issue.", `<td class="name">delete_repo</td>`}},
-		{"/ui/calls?connector=github&result=failed", []string{"create_issue", "812 ms", "unauthorized", "Kept for 30 days", "Nov 11 09:30",
+		{"/ui/calls?connector=github&result=failed", []string{"create_issue", "812 ms", "<th class=\"r hide-sm\">Size</th>", "312 B", "48 KiB", "1.2 MiB", "unauthorized", "Kept for 30 days", "Nov 11 09:30",
 			`<details class="why"><summary aria-controls="why-1">`, `<tr class="why-row" id="why-1">`, "jira needs you to &lt;b&gt;sign in&lt;/b&gt;."}},
 		{"/ui/search?q=open+a+ticket", []string{"github.", "0.3095", "w-100", "word rank 1, meaning rank 2", "linear: linear needs you to sign in."}},
 		{"/ui/tokens", []string{"ci-bot", "1 h ago", `<details class="multi">`, `name="connector" value="jira"`, "/ui/static/console.js", ">remote</span>"}},

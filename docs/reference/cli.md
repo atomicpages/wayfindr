@@ -495,7 +495,8 @@ wayfindr status --check > /dev/null || echo "wayfindr needs attention"
 
 Ask the running daemon for its call log: one row per `call_tool` call, newest
 first. A call that didn't end `ok` is followed by the error text the agent got
-back. Arguments and results are never stored. How long rows are kept is
+back, and every row shows how big the result was. Arguments and results are
+never stored. How long rows are kept is
 [`[calls] retention`](./configuration#calls), 30 days by default.
 
 | Flag          | Default | Description                                                                                                                                                                                   |
@@ -508,13 +509,14 @@ back. Arguments and results are never stored. How long rows are kept is
 **Prints:**
 
 ```
-TIME                  CLIENT       TOKEN           TOOL                  DURATION  RESULT
-2026-11-08T09:14:02Z  claude-code  default         linear.create_issue   412ms     ok
-2026-11-08T09:13:40Z  claude-code  default         linear.search_issues  1.2s      tool_error
+TIME                  CLIENT       TOKEN           TOOL                  DURATION  RESULT                     SIZE
+2026-11-08T09:14:02Z  claude-code  default         linear.create_issue   412ms     ok                         312 B
+2026-11-08T09:13:40Z  claude-code  default         linear.search_issues  1.2s      tool_error                 48 KiB
                                                                                    Unknown filter: state=opne
-2026-11-08T09:12:11Z  -            nightly-triage  github.get_file       -         rejected: schema_mismatch
+2026-11-08T09:13:32Z  claude-code  default         linear.list_issues    2.3s      ok                         1.2 MiB
+2026-11-08T09:12:11Z  -            nightly-triage  github.get_file       -         rejected: schema_mismatch  -
                                                                                    The arguments do not match github.get_file's inputSchema. To fix: Fix the arguments and call again.
-2026-11-08T08:55:02Z  cursor       default         slack.post_message    30.0s     failed: timeout
+2026-11-08T08:55:02Z  cursor       default         slack.post_message    30.0s     failed: timeout            -
 ```
 
 - **TIME** is when the call arrived, in UTC.
@@ -537,6 +539,14 @@ TIME                  CLIENT       TOKEN           TOOL                  DURATIO
   the next line: the upstream's own text for `tool_error`, Wayfindr's message
   otherwise. The text is on one line, at most 500 bytes, with URL query strings
   masked. Calls logged before Wayfindr kept it have none.
+- **SIZE** is how big the result was that the agent got back, in binary units:
+  bytes below 1 KiB, then `KiB`, `MiB`, and `GiB`, with one decimal below 10 and
+  none above, such as `312 B`, `48 KiB`, and `1.2 MiB`. It is the length of the
+  result's JSON encoding, so it covers its content and `structuredContent`. A
+  `tool_error` result has a size too. It is `-` when no result came back from
+  the upstream (a call Wayfindr refused or that failed), for an `input_required`
+  call, and for calls logged before Wayfindr recorded sizes. Only the size is
+  kept, never the result.
 
 | Result           | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -561,6 +571,7 @@ adds `The call log is off: [calls] retention is 0s, so no calls are recorded.`
 | `calls[].duration_ms`       | How long Wayfindr spent calling the upstream. Absent when it didn't call it.                                                  |
 | `calls[].result`            | `ok`, `tool_error`, `rejected`, `failed`, or `input_required`.                                                                |
 | `calls[].kind`, `case`      | Why a call that isn't `ok` ended that way. Absent when unknown.                                                               |
+| `calls[].result_bytes`      | The size in bytes of the result the agent got back, as SIZE counts it. Absent when unknown, as SIZE shows `-`.                |
 | `calls[].error`             | The error text the agent got back from a call that isn't `ok`: one line, at most 500 bytes. Absent when there is none.        |
 
 `calls` is always an array.

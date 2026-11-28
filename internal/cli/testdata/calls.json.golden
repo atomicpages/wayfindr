@@ -8,7 +8,8 @@
       "connector": "linear",
       "tool": "create_issue",
       "duration_ms": 412,
-      "result": "ok"
+      "result": "ok",
+      "result_bytes": 312
     },
     {
       "started_at": "2026-11-08T09:13:40Z",
@@ -18,7 +19,18 @@
       "tool": "search_issues",
       "duration_ms": 1234,
       "result": "tool_error",
+      "result_bytes": 49152,
       "error": "Unknown filter: state=opne"
+    },
+    {
+      "started_at": "2026-11-08T09:13:32Z",
+      "client": "claude-code",
+      "token_name": "default",
+      "connector": "linear",
+      "tool": "list_issues",
+      "duration_ms": 2310,
+      "result": "ok",
+      "result_bytes": 1258291
     },
     {
       "started_at": "2026-11-08T09:12:11Z",

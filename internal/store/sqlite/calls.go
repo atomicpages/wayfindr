@@ -28,10 +28,10 @@ func (s *Store) RecordCall(ctx context.Context, c store.Call) error {
 	}
 
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO calls
-		(id, user_id, client, token_name, connector, tool, started_at, duration_ms, result, error_kind, error_case, error_text)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, user_id, client, token_name, connector, tool, started_at, duration_ms, result, error_kind, error_case, error_text, result_bytes)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id.String(), c.UserID, nullString(c.Client), nullString(c.TokenName), c.Connector, c.Tool, c.StartedAt.UnixMilli(),
-		durationMS, string(c.Result), nullString(c.ErrorKind), nullString(c.ErrorCase), nullString(c.ErrorText)); err != nil {
+		durationMS, string(c.Result), nullString(c.ErrorKind), nullString(c.ErrorCase), nullString(c.ErrorText), c.ResultBytes); err != nil {
 		return fmt.Errorf("record call: %w", err)
 	}
 
@@ -42,7 +42,7 @@ func (s *Store) RecordCall(ctx context.Context, c store.Call) error {
 // lower bound on started_at (0 for none), ?3 drops ok calls when true, and
 // ?4, a JSON array of ?5 connectors, keeps only those when non-empty.
 const listCallsSQL = `SELECT id, user_id, client, token_name, connector, tool, started_at,
-	duration_ms, result, error_kind, error_case, error_text
+	duration_ms, result, error_kind, error_case, error_text, result_bytes
 FROM calls
 WHERE user_id = ?1
   AND (?2 = 0 OR started_at >= ?2)
@@ -88,11 +88,12 @@ func (s *Store) ListCalls(ctx context.Context, f store.CallFilter) ([]store.Call
 			errText           sql.NullString
 			startedAt         int64
 			durationMS        sql.NullInt64
+			resultBytes       sql.NullInt64
 			result            string
 		)
 
 		if err := rows.Scan(&c.ID, &c.UserID, &client, &tokenName, &c.Connector, &c.Tool, &startedAt,
-			&durationMS, &result, &errKind, &errCase, &errText); err != nil {
+			&durationMS, &result, &errKind, &errCase, &errText, &resultBytes); err != nil {
 			return nil, fmt.Errorf("list calls: %w", err)
 		}
 
@@ -103,6 +104,10 @@ func (s *Store) ListCalls(ctx context.Context, f store.CallFilter) ([]store.Call
 		c.ErrorKind = errKind.String
 		c.ErrorCase = errCase.String
 		c.ErrorText = errText.String
+
+		if resultBytes.Valid {
+			c.ResultBytes = &resultBytes.Int64
+		}
 
 		if durationMS.Valid {
 			d := time.Duration(durationMS.Int64) * time.Millisecond

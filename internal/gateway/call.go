@@ -119,6 +119,8 @@ func (g *Gateway) callCore(ctx context.Context, r CallRequest, opts CallOptions)
 			ErrorKind: o.kind,
 			ErrorCase: o.errCase,
 			ErrorText: o.text,
+
+			ResultBytes: o.resultBytes,
 		})
 	}
 
@@ -138,6 +140,10 @@ type outcome struct {
 	// duration is how long upstreams.Call took, connecting included; nil
 	// when the call never got that far.
 	duration *time.Duration
+	// resultBytes is the length of the upstream's result's JSON encoding
+	// (see resultBytes); nil when no result came back, and for an
+	// input_required result, which is not the tool's own.
+	resultBytes *int64
 }
 
 // call validates the call and forwards it (design §7.6): split the
@@ -273,6 +279,7 @@ func (g *Gateway) call(ctx context.Context, r CallRequest, opts CallOptions) (*m
 		return asked, o
 	}
 
+	o.resultBytes = resultBytes(res)
 	o.result = store.CallOK
 
 	if res.IsError {
@@ -281,6 +288,25 @@ func (g *Gateway) call(ctx context.Context, r CallRequest, opts CallOptions) (*m
 	}
 
 	return res, o
+}
+
+// resultBytes is the size of res as the call log keeps it: the length of
+// its JSON encoding, which covers its content and structuredContent. It is
+// not the bytes on the wire: the SDK adds resultType, normalizes a nil
+// content, and wraps the result in the JSON-RPC envelope when it sends it.
+// Encoding the result again here costs one marshal per call: acceptable, and
+// cheaper than hooking the transport to count the bytes it writes. Nil when
+// res does not encode, which the SDK would then fail to send as well.
+func resultBytes(res *mcp.CallToolResult) *int64 {
+	b, err := json.Marshal(res)
+
+	if err != nil {
+		return nil
+	}
+
+	n := int64(len(b))
+
+	return &n
 }
 
 // fail is the error result of a call that ended with err, and its outcome.

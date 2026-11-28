@@ -20,11 +20,12 @@ func ms(n int64) *time.Duration {
 
 // callsAt returns the fixture calls of user: one per result, a second
 // apart from base, oldest first. Client and TokenName vary independently, each
-// empty in some calls.
+// empty in some calls. ResultBytes is set in two, one of them 0, and nil in
+// the rest, so the round trip tells 0 from NULL.
 func callsAt(user string, base time.Time) []store.Call {
 	return []store.Call{
 		{UserID: user, Client: "claude-code", TokenName: "default", Connector: "linear", Tool: "create_issue",
-			StartedAt: base, Duration: ms(412), Result: store.CallOK},
+			StartedAt: base, Duration: ms(412), Result: store.CallOK, ResultBytes: ptr(int64(1_258_291))},
 		{UserID: user, TokenName: "default", Connector: "github", Tool: "get_file",
 			StartedAt: base.Add(time.Second), Result: store.CallRejected,
 			ErrorKind: "invalid_arguments", ErrorCase: "schema_mismatch",
@@ -33,9 +34,11 @@ func callsAt(user string, base time.Time) []store.Call {
 			StartedAt: base.Add(2 * time.Second), Duration: ms(30_000), Result: store.CallFailed, ErrorKind: "timeout"},
 		{UserID: user, Client: "cursor", Connector: "linear", Tool: "search_issues",
 			StartedAt: base.Add(3 * time.Second), Duration: ms(230), Result: store.CallToolError,
-			ErrorText: "Unknown filter: state=opne"},
+			ErrorText: "Unknown filter: state=opne", ResultBytes: ptr(int64(0))},
 	}
 }
+
+func ptr[T any](v T) *T { return &v }
 
 func recordCalls(t *testing.T, s store.Store, calls []store.Call) {
 	t.Helper()

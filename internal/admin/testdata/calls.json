@@ -26,7 +26,8 @@
       "connector": "linear",
       "tool": "create_issue",
       "duration_ms": 412,
-      "result": "ok"
+      "result": "ok",
+      "result_bytes": 312
     }
   ]
 }

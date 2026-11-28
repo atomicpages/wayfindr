@@ -2,6 +2,8 @@ package gateway_test
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,12 +14,14 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rs/zerolog"
 
 	"github.com/atomicpages/wayfindr/internal/clienttoken"
 	"github.com/atomicpages/wayfindr/internal/config"
 	"github.com/atomicpages/wayfindr/internal/gateway"
 	"github.com/atomicpages/wayfindr/internal/store"
 	"github.com/atomicpages/wayfindr/internal/testutil/fakeupstream"
+	"github.com/atomicpages/wayfindr/internal/upstream"
 )
 
 // recorder is a gateway.Calls that keeps what it is given.
@@ -110,7 +114,7 @@ func TestCallToolRecordsEveryCallOnceWithItsOutcome(t *testing.T) {
 					want.TokenName = clienttoken.DefaultName
 					// The gateway's own messages are pinned by its error tests;
 					// here only whether a call that did not end ok kept one.
-					opts := cmp.Options{cmpopts.IgnoreFields(store.Call{}, "UserID", "StartedAt", "Duration")}
+					opts := cmp.Options{cmpopts.IgnoreFields(store.Call{}, "UserID", "StartedAt", "Duration", "ResultBytes")}
 
 					if want.Result != store.CallOK && want.Result != store.CallToolError {
 						opts = append(opts, cmpopts.IgnoreFields(store.Call{}, "ErrorText"))
@@ -132,10 +136,81 @@ func TestCallToolRecordsEveryCallOnceWithItsOutcome(t *testing.T) {
 						t.Errorf("StartedAt %v is not during the call", got[0].StartedAt)
 					}
 
+					// A result came back exactly when the upstream was called
+					// and did not ask for input; its size is pinned by
+					// TestCallToolRecordsTheSizeOfTheResult.
+					if (got[0].ResultBytes != nil) != (tt.upstreamCall && want.Result != store.CallFailed) {
+						t.Errorf("ResultBytes = %v, want it set only for a result that came back", got[0].ResultBytes)
+					}
+
 					if (got[0].Duration != nil) != tt.upstreamCall {
 						t.Errorf("Duration = %v, want set only when the upstream was called (%v)", got[0].Duration, tt.upstreamCall)
 					}
 				})
+			}
+		})
+	}
+}
+
+// TestCallToolRecordsTheSizeOfTheResult: the call log keeps the length of
+// the result's JSON encoding, content and structuredContent included, for
+// a result that came back (an isError one too), and nothing for a refusal
+// or a failure.
+func TestCallToolRecordsTheSizeOfTheResult(t *testing.T) {
+	const (
+		plain      = `{"content":[{"type":"text","text":"ok"}]}`
+		structured = `{"content":[{"type":"text","text":"ok"}],"structuredContent":{"n":1}}`
+		toolError  = `{"content":[{"type":"text","text":"no"}],"isError":true}`
+	)
+
+	big := strings.Repeat("x", 100_000)
+	bigJSON := `{"content":[{"type":"text","text":"` + big + `"}]}`
+	text := func(s string) []mcp.Content { return []mcp.Content{&mcp.TextContent{Text: s}} }
+	size := func(s string) *int64 { n := int64(len(s)); return &n }
+
+	tests := []struct {
+		name string
+		up   *stubUpstreams
+		args map[string]any
+		want *int64
+	}{
+		{"text", &stubUpstreams{res: &mcp.CallToolResult{Content: text("ok")}}, nil, size(plain)},
+		{"structured content", &stubUpstreams{res: &mcp.CallToolResult{Content: text("ok"), StructuredContent: map[string]any{"n": 1}}}, nil, size(structured)},
+		{"tool error", &stubUpstreams{res: &mcp.CallToolResult{Content: text("no"), IsError: true}}, nil, size(toolError)},
+		{"large", &stubUpstreams{res: &mcp.CallToolResult{Content: text(big)}}, nil, size(bigJSON)},
+		{"upstream failure", &stubUpstreams{err: errors.New("boom")}, nil, nil},
+		{"refusal", &stubUpstreams{res: &mcp.CallToolResult{Content: text("ok")}}, map[string]any{"name": "linear.delete_issue"}, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := &recorder{}
+			tt.up.statuses = []upstream.ConnectorStatus{{Connector: "linear", State: upstream.StateReady}}
+			g := gateway.New(gateway.Options{
+				Upstreams: tt.up,
+				Catalog:   &stubCatalog{tool: linearTool(t, createIssue())},
+				Calls:     rec,
+				Logger:    zerolog.Nop(),
+			})
+			srv := httptest.NewServer(authed(g))
+			t.Cleanup(srv.Close)
+			cs := connect(t, srv.URL, fakeupstream.V20250618)
+
+			args := tt.args
+
+			if args == nil {
+				args = map[string]any{"name": "linear.create_issue", "arguments": map[string]any{"title": "x"}}
+			}
+
+			call(t, cs, "call_tool", args)
+			got := rec.take()
+
+			if len(got) != 1 {
+				t.Fatalf("recorded %d calls, want 1", len(got))
+			}
+
+			if diff := cmp.Diff(tt.want, got[0].ResultBytes); diff != "" {
+				t.Errorf("ResultBytes (-want +got):\n%s", diff)
 			}
 		})
 	}

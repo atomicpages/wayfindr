@@ -1,9 +1,10 @@
-TIME                  CLIENT       TOKEN           TOOL                  DURATION  RESULT
-2026-11-08T09:14:02Z  claude-code  default         linear.create_issue   412ms     ok
-2026-11-08T09:13:40Z  claude-code  default         linear.search_issues  1.2s      tool_error
+TIME                  CLIENT       TOKEN           TOOL                  DURATION  RESULT                     SIZE
+2026-11-08T09:14:02Z  claude-code  default         linear.create_issue   412ms     ok                         312 B
+2026-11-08T09:13:40Z  claude-code  default         linear.search_issues  1.2s      tool_error                 48 KiB
                                                                                    Unknown filter: state=opne
-2026-11-08T09:12:11Z  -            -               github.get_file       -         rejected: schema_mismatch
+2026-11-08T09:13:32Z  claude-code  default         linear.list_issues    2.3s      ok                         1.2 MiB
+2026-11-08T09:12:11Z  -            -               github.get_file       -         rejected: schema_mismatch  -
                                                                                    The arguments do not match github.get_file's inputSchema. To fix: Fix the arguments and call again.
-2026-11-08T08:55:02Z  cursor       nightly-triage  slack.post_message    30.0s     failed: timeout
-2026-11-08T08:54:02Z  -            -               create_issue          -         rejected: unqualified
-2026-11-08T08:53:02Z  -            -               -                     -         rejected: missing_name
+2026-11-08T08:55:02Z  cursor       nightly-triage  slack.post_message    30.0s     failed: timeout            -
+2026-11-08T08:54:02Z  -            -               create_issue          -         rejected: unqualified      -
+2026-11-08T08:53:02Z  -            -               -                     -         rejected: missing_name     -

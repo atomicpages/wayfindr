@@ -2,7 +2,7 @@
 <div class="page-head">
   <div>
     <h1>Calls</h1>
-    <p>Every <code>call_tool</code> request, newest first.{{if not .Off}} Kept for {{.Retention}}.{{end}} Wayfindr never records arguments or results, only the error a call ended with.</p>
+    <p>Every <code>call_tool</code> request, newest first.{{if not .Off}} Kept for {{.Retention}}.{{end}} Wayfindr never records arguments or results, only the size of a result and the error a call ended with.</p>
   </div>
 </div>
 {{if .Off}}
@@ -24,7 +24,7 @@
   </form>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Time</th><th>Tool</th><th class="hide-sm">Client token</th><th class="r hide-sm">Duration</th><th>Result</th></tr></thead>
+      <thead><tr><th>Time</th><th>Tool</th><th class="hide-sm">Client token</th><th class="r hide-sm">Duration</th><th>Result</th><th class="r hide-sm">Size</th></tr></thead>
       <tbody>
       {{range $i, $row := .Rows}}
         <tr{{if .Error}} class="has-why"{{end}}>
@@ -33,10 +33,11 @@
           <td class="hide-sm">{{with .Token}}<span class="badge secondary">{{.}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
           <td class="r mono nowrap hide-sm">{{or .Duration "—"}}</td>
           <td>{{if .Error}}<details class="why"><summary aria-controls="why-{{$i}}">{{template "badge" .Badge}}{{with .Why}}<span class="muted small">{{.}}</span>{{end}}{{icon "chev"}}<span class="sr">Show the error</span></summary></details>{{else}}{{template "badge" .Badge}}{{with .Why}} <span class="muted small">{{.}}</span>{{end}}{{end}}</td>
+          <td class="r mono nowrap hide-sm">{{or .Size "—"}}</td>
         </tr>
-        {{if .Error}}<tr class="why-row" id="why-{{$i}}"><td colspan="5"><p class="why-text">{{.Error}}</p></td></tr>{{end}}
+        {{if .Error}}<tr class="why-row" id="why-{{$i}}"><td colspan="6"><p class="why-text">{{.Error}}</p></td></tr>{{end}}
       {{else}}
-        <tr><td colspan="5" class="empty">{{if or .Connector .Failed}}No calls match these filters.{{else}}No calls yet.{{end}}</td></tr>
+        <tr><td colspan="6" class="empty">{{if or .Connector .Failed}}No calls match these filters.{{else}}No calls yet.{{end}}</td></tr>
       {{end}}
       </tbody>
     </table>

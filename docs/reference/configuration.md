@@ -237,7 +237,8 @@ command is started. Connectors that are `starting`, `needs_auth`, or
 
 The call log: one row per `call_tool` call, which
 [`wayfindr calls`](./cli#wayfindr-calls) shows. Arguments and results are never
-stored; a call that didn't end `ok` keeps its error text.
+stored, only the size of each result; a call that didn't end `ok` keeps its
+error text.
 
 | Key         | Type     | Default  |
 | ----------- | -------- | -------- |

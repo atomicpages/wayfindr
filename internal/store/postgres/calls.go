@@ -28,10 +28,10 @@ func (s *Store) RecordCall(ctx context.Context, c store.Call) error {
 	}
 
 	if _, err := s.pool.Exec(ctx, `INSERT INTO calls
-		(id, user_id, client, token_name, connector, tool, started_at, duration_ms, result, error_kind, error_case, error_text)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		(id, user_id, client, token_name, connector, tool, started_at, duration_ms, result, error_kind, error_case, error_text, result_bytes)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		id.String(), c.UserID, nullable(c.Client), nullable(c.TokenName), c.Connector, c.Tool, c.StartedAt.Truncate(time.Millisecond),
-		durationMS, string(c.Result), nullable(c.ErrorKind), nullable(c.ErrorCase), nullable(c.ErrorText)); err != nil {
+		durationMS, string(c.Result), nullable(c.ErrorKind), nullable(c.ErrorCase), nullable(c.ErrorText), c.ResultBytes); err != nil {
 		return fmt.Errorf("record call: %w", err)
 	}
 
@@ -42,7 +42,7 @@ func (s *Store) RecordCall(ctx context.Context, c store.Call) error {
 // lower bound on started_at (NULL for none), $3 drops ok calls when true,
 // and $4 keeps only the listed connectors when non-empty.
 const listCallsSQL = `SELECT id::text, user_id::text, client, token_name, connector, tool, started_at,
-	duration_ms, result, error_kind, error_case, error_text
+	duration_ms, result, error_kind, error_case, error_text, result_bytes
 FROM calls
 WHERE user_id = $1
   AND ($2::timestamptz IS NULL OR started_at >= $2)
@@ -80,11 +80,12 @@ func (s *Store) ListCalls(ctx context.Context, f store.CallFilter) ([]store.Call
 			errKind, errCase  *string
 			errText           *string
 			durationMS        *int64
+			resultBytes       *int64
 			result            string
 		)
 
 		if err := rows.Scan(&c.ID, &c.UserID, &client, &tokenName, &c.Connector, &c.Tool, &c.StartedAt,
-			&durationMS, &result, &errKind, &errCase, &errText); err != nil {
+			&durationMS, &result, &errKind, &errCase, &errText, &resultBytes); err != nil {
 			return nil, fmt.Errorf("list calls: %w", err)
 		}
 
@@ -94,6 +95,7 @@ func (s *Store) ListCalls(ctx context.Context, f store.CallFilter) ([]store.Call
 		c.ErrorKind = deref(errKind)
 		c.ErrorCase = deref(errCase)
 		c.ErrorText = deref(errText)
+		c.ResultBytes = resultBytes
 
 		if durationMS != nil {
 			d := time.Duration(*durationMS) * time.Millisecond

@@ -410,8 +410,11 @@ type callRow struct {
 	Tool      string
 	Token     string
 	Duration  string
-	Badge     badge
-	Why       string
+	// Size is the result's size in binary units, such as 312 B or 1.2 MiB;
+	// empty when not known.
+	Size  string
+	Badge badge
+	Why   string
 	// Error is the error text the agent got back, shown when the row is
 	// opened; empty for a call that is ok or has none.
 	Error string
@@ -477,6 +480,10 @@ func (c *console) calls(w http.ResponseWriter, r *http.Request, s sess) {
 
 		if call.DurationMS != nil {
 			row.Duration = fmt.Sprintf("%d ms", *call.DurationMS)
+		}
+
+		if call.ResultBytes != nil {
+			row.Size = admin.FormatBytes(*call.ResultBytes)
 		}
 
 		body.Rows = append(body.Rows, row)
