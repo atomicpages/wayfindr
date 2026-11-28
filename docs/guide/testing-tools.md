@@ -40,17 +40,26 @@ refuses a hidden one, as it does for an agent.
 
 ## Fill in the arguments
 
-Ask for a starting point. `--scaffold` prints the required arguments as JSON and
-describes every argument on stderr:
+Read what the tool takes:
 
 ```sh
-wayfindr call linear.create_issue --scaffold > args.json
+wayfindr connector tools linear create_issue
 ```
 
 ```text
-  team    string  required  The team's key.
-  title   string  required
-  labels  array             Label names.
+linear.create_issue (write)
+
+  NAME    TYPE      REQUIRED  DESCRIPTION
+  team    string    required  The team's key.
+  title   string    required
+  labels  string[]            Label names.
+```
+
+Then ask for a starting point. `--scaffold` prints the required arguments as
+JSON, and nothing else:
+
+```sh
+wayfindr call linear.create_issue --scaffold > args.json
 ```
 
 Fill in `args.json`, then pass it back:

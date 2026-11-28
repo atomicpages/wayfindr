@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/atomicpages/wayfindr/internal/admin"
 	"github.com/atomicpages/wayfindr/internal/redact"
@@ -56,88 +54,32 @@ func scaffold(fields []admin.SchemaField) string {
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
-// fieldTable is one line per field: name, type, required, and the
-// description, made printable, with the enum's values when it has some.
-func fieldTable(fields []admin.SchemaField) string {
-	var b bytes.Buffer
-
-	tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-
-	for _, f := range fields {
-		req := ""
-
-		if f.Required {
-			req = "required"
-		}
-
-		typ := f.Type
-
-		if typ == "" {
-			typ = "any"
-		}
-
-		desc := f.Description
-
-		if len(f.Enum) > 0 {
-			desc = strings.TrimSpace(desc + " One of " + enumList(f.Enum) + ".")
-		}
-
-		// A tabwriter over a bytes.Buffer cannot fail.
-		_, _ = fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", redact.Printable(f.Name), typ, req, redact.Printable(desc))
-	}
-
-	_ = tw.Flush()
-
-	// tabwriter pads the empty last cells too.
-	lines := strings.Split(b.String(), "\n")
-
-	for i, l := range lines {
-		lines[i] = strings.TrimRight(l, " ")
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-// enumList words enum values as they are written: "a, b, c".
-func enumList(enum []json.RawMessage) string {
-	parts := make([]string, len(enum))
-
-	for i, e := range enum {
-		parts[i] = string(e)
-	}
-
-	return strings.Join(parts, ", ")
-}
-
 // writeScaffold prints the scaffold of a tool definition's inputSchema to
-// out and its field table to errOut, so out can be saved and fed back
-// with --args-file.
-func writeScaffold(out, errOut io.Writer, definition json.RawMessage) error {
-	var d struct {
-		InputSchema json.RawMessage `json:"inputSchema"`
-	}
-
-	if err := json.Unmarshal(definition, &d); err != nil {
-		return fmt.Errorf("read the tool's definition: %w", err)
-	}
-
-	fields, err := admin.SchemaFields(d.InputSchema)
+// out, and nothing else, so it can be saved and fed back with --args-file.
+// `wayfindr connector tools <connector> <tool>` describes the arguments.
+func writeScaffold(out io.Writer, definition json.RawMessage) error {
+	fields, err := inputFields(definition)
 
 	if err != nil {
 		return err
 	}
 
-	if _, err := fmt.Fprintln(out, scaffold(fields)); err != nil {
-		return err
-	}
-
-	if len(fields) == 0 {
-		return nil
-	}
-
-	_, err = io.WriteString(errOut, fieldTable(fields))
+	_, err = fmt.Fprintln(out, scaffold(fields))
 
 	return err
+}
+
+// inputFields are the fields of a tool definition's inputSchema.
+func inputFields(definition json.RawMessage) ([]admin.SchemaField, error) {
+	var d struct {
+		InputSchema json.RawMessage `json:"inputSchema"`
+	}
+
+	if err := json.Unmarshal(definition, &d); err != nil {
+		return nil, fmt.Errorf("read the tool's definition: %w", err)
+	}
+
+	return admin.SchemaFields(d.InputSchema)
 }
 
 // errNoAnswer means stdin ended before a question was answered.

@@ -86,7 +86,10 @@ func newCallDaemon(t *testing.T, answers ...string) (Host, *callDaemon) {
 
 const okResult = `{"content":[{"type":"text","text":"Issue ENG-481 created."},{"type":"image","data":"AAECAw==","mimeType":"image/png"}]}`
 
-func TestCallScaffoldPrintsJSONAndAFieldTable(t *testing.T) {
+// TestCallScaffoldPrintsOnlyJSON: --scaffold's stdout is the JSON object of
+// the required arguments and nothing else, and stderr stays empty, so the
+// two never interleave on a terminal.
+func TestCallScaffoldPrintsOnlyJSON(t *testing.T) {
 	host, d := newCallDaemon(t, okResult)
 	stdout, stderr, code := run(t, host, "call", "linear.create_issue", "--scaffold")
 
@@ -98,16 +101,8 @@ func TestCallScaffoldPrintsJSONAndAFieldTable(t *testing.T) {
 		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
 
-	if !json.Valid([]byte(stdout)) {
-		t.Errorf("stdout is not JSON: %q", stdout)
-	}
-
-	want := "  team    string  required  The team's key.\n" +
-		"  title   string  required\n" +
-		"  labels  array             Label names.\n"
-
-	if diff := cmp.Diff(want, stderr); diff != "" {
-		t.Errorf("stderr (-want +got):\n%s", diff)
+	if stderr != "" {
+		t.Errorf("stderr = %q, want nothing", stderr)
 	}
 
 	if len(d.got()) != 0 {

@@ -32,7 +32,7 @@ wayfindr auth login linear    # authorize an OAuth connector
 | [`wayfindr connector edit <name>`](#wayfindr-connector-edit)       | Change keys of a connector in the config file and report it.                         | Starts one, unless the edit changes nothing            |
 | [`wayfindr connector import <client>`](#wayfindr-connector-import) | Add the MCP servers a client is set up with as connectors.                           | Starts one, unless `--no-wait`                         |
 | [`wayfindr connector remove <name>`](#wayfindr-connector-remove)   | Remove a connector and what it owned: its credential and secrets. Asks first.        | Starts one, if there is something to delete            |
-| [`wayfindr connector tools <name>`](#wayfindr-connector-tools)     | List a connector's tools and which ones its tools list exposes.                      | Yes, 30 s                                              |
+| [`wayfindr connector tools <name> [tool]`](#wayfindr-connector-tools) | List a connector's tools, or describe one tool's arguments.                       | Yes, 30 s                                              |
 | [`wayfindr auth login <connector>`](#wayfindr-auth-login)          | Run a connector's auth flow, in the browser or with a device code.                   | Yes, 60 s to start, then it waits for the flow         |
 | [`wayfindr auth logout <connector>`](#wayfindr-auth-logout)        | Delete a connector's stored OAuth credential, or forget an unattended grant's token. | Yes, 90 s                                              |
 | [`wayfindr secret set <name>`](#wayfindr-secret-set)               | Store a secret for `${secret:name}` references.                                      | Yes, 90 s                                              |
@@ -679,6 +679,7 @@ to prove a sign-in works, or to see what a scoped token's agent sees. See
 
 ```sh
 wayfindr connector tools linear                     # pick a tool
+wayfindr connector tools linear create_issue        # read its arguments
 wayfindr call linear.create_issue --scaffold > args.json
 wayfindr call linear.create_issue --args-file args.json
 ```
@@ -687,7 +688,7 @@ wayfindr call linear.create_issue --args-file args.json
 | --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
 | `--args <json>`       | `{}`    | The tool's arguments, a JSON object.                                                                                |
 | `--args-file <path>`  | none    | Read the arguments from a file. `-` reads stdin. Not with `--args`.                                                 |
-| `--scaffold`          | `false` | Print a JSON object of the tool's required arguments to stdout and a table of every argument to stderr, then exit.  |
+| `--scaffold`          | `false` | Print a JSON object of the tool's required arguments, and nothing else, then exit.                                   |
 | `--token-file <path>` | none    | Run the call as the client token in this file, narrowed to its connectors. `-` reads stdin.                         |
 | `--yes`               | `false` | Run a `write` or `destructive` tool without asking.                                                                 |
 | `--output <file>`     | none    | Also write the whole result, as MCP's JSON, to this file.                                                           |
@@ -701,13 +702,13 @@ stores nor logs it. A token the daemon doesn't accept fails with
 
 **`--scaffold`** prints every required argument with its type's zero value
 (`""`, `0`, `false`, `[]`, `{}`, or an enum's first value), in the order the
-schema lists them, then the table on stderr:
+schema lists them, and nothing else, so it can be saved and passed back with
+`--args-file`. A schema that requires nothing prints `{}`.
+[`connector tools <connector> <tool>`](#wayfindr-connector-tools) describes
+every argument.
 
 ```
 {"team": "", "title": ""}
-  team    string  required  The team's key.
-  title   string  required
-  labels  array             Label names.
 ```
 
 Edit the JSON and pass it back with `--args-file`.
@@ -1463,8 +1464,45 @@ can't rewrite your terminal; `--json` keeps the name as sent.
 (`name`, `description`, `inputSchema`, `annotations`, and so on). Wayfindr
 re-encodes it, so its keys may come in a different order than the upstream sent them.
 
+**With a tool**, it describes that tool's arguments instead: a line with the
+tool and its class (and `hidden by the tools list` when it is), a note when the
+schema requires no argument, then one row per argument in the schema's order:
+
+```
+$ wayfindr connector tools linear save_issue
+linear.save_issue (write)
+No argument is required by the schema; its descriptions may still say what a call needs.
+
+  NAME             TYPE         DESCRIPTION
+  addLabels        string[]     Label names or IDs as a JSON array of strings (e.g. ["Bug",
+                                "Urgent"]) to add. Append-only; existing labels are never removed.
+  assignee         string|null  User ID, name, email, or "me". Null to remove
+  …
+  slaType          string|null  SLA day counting type: "all" or "onlyBusinessDays". Only use with
+                                slaBreachesAt; null means unset. One of "all", "onlyBusinessDays".
+  team             string       Team name or ID (required when creating)
+  …
+```
+
+- **TYPE** is every type the schema allows, joined by `|` (`string|null`),
+  read from `type` or from the members of `anyOf` and `oneOf`; an array shows
+  its item type (`string[]`, `object[]`) when it has one, and `any` means the
+  schema names no type.
+- **REQUIRED** is a column only when some argument is required.
+- **DESCRIPTION** is the upstream's text on one line, with the allowed values
+  when there are some. On a terminal it wraps to its width, unless that leaves
+  the column under 30 characters; piped, each argument stays on one line, for
+  `grep`.
+
+A tool whose schema has no properties prints `It takes no arguments.` after its
+first line instead of a table.
+
+A tool whose schema requires nothing, such as one that both creates and
+updates, may still say what a create needs in its descriptions, as `team` does
+above. With `--json` it prints that tool's entry, as in the list.
+
 **Exit:** `0` with the list. `1` when the daemon isn't running, there is no such
-connector, or the connector isn't ready; the message says what to do.
+connector or tool, or the connector isn't ready; the message says what to do.
 
 ## `wayfindr auth`
 

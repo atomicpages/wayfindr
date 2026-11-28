@@ -37,6 +37,14 @@ func TestBuildFields(t *testing.T) {
 					Options: []formOption{none, opt("true", "true"), opt("false", "false")}},
 				{ID: "a-2", Name: "arg.o", Label: "o", Kind: "select", Type: "choice", Options: []formOption{none, opt("1", "1")}},
 			}},
+		// anyOf with one non-null type is that type's input, not a JSON
+		// textarea; several non-null types stay JSON.
+		{"anyOf with null is its type", `{"properties":{"at":{"anyOf":[{"type":"string"},{"type":"null"}]},` +
+			`"either":{"anyOf":[{"type":"string"},{"type":"object"}]}}}`,
+			[]formField{
+				{ID: "a-0", Name: "arg.at", Label: "at", Kind: "text", Type: "string"},
+				{ID: "a-1", Name: "arg.either", Label: "either", Kind: "json", Type: "JSON"},
+			}},
 		// A required select still starts blank, so the browser preselects
 		// nothing and a required flag is never sent as true untouched.
 		{"required boolean starts blank", `{"properties":{"force":{"type":"boolean"}},"required":["force"]}`,
