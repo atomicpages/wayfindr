@@ -46,6 +46,7 @@ type Admin interface {
 	Calls(ctx context.Context, q admin.CallsQuery) (admin.Calls, error)
 	Search(ctx context.Context, req admin.SearchRequest) (admin.SearchResult, error)
 	Tools(ctx context.Context, connector string) (admin.ToolList, error)
+	Call(ctx context.Context, req admin.CallRequest) (admin.CallResponse, error)
 	ListTokens(ctx context.Context) (admin.TokenList, error)
 	CreateToken(ctx context.Context, spec admin.TokenSpec) (admin.TokenCreated, error)
 	RevokeToken(ctx context.Context, name string) (admin.TokenRevoked, error)
@@ -129,6 +130,9 @@ func New(opts Options) (http.Handler, error) {
 	mux.HandleFunc("GET /ui/connectors/{name}", c.authed(c.connector))
 	mux.HandleFunc("POST /ui/connectors/{name}/sign-in", c.authedForm(c.signIn))
 	mux.HandleFunc("POST /ui/connectors/{name}/sign-out", c.authedForm(c.signOut))
+	mux.HandleFunc("GET /ui/connectors/{name}/tools/{tool}", c.authed(c.toolPage))
+	// A call's arguments may be as large as the admin API takes.
+	mux.HandleFunc("POST /ui/connectors/{name}/tools/{tool}", c.authedFormMax(admin.MaxCallBody, c.runTool))
 	mux.HandleFunc("GET /ui/add", c.authed(c.addPage))
 	mux.HandleFunc("POST /ui/add", c.authedForm(c.add))
 	mux.HandleFunc("POST /ui/add/confirm", c.authedForm(c.confirmAdd))
@@ -176,7 +180,7 @@ func parsePages(brands brandIndex) (map[string]*template.Template, error) {
 
 	pages := map[string]*template.Template{}
 
-	for _, name := range []string{"connectors", "connector", "calls", "search", "tokens", "cloudagents", "error", "add", "review", "device", "approve"} {
+	for _, name := range []string{"connectors", "connector", "tool", "calls", "search", "tokens", "cloudagents", "error", "add", "review", "device", "approve"} {
 		t, err := template.Must(layout.Clone()).ParseFS(templateFiles, "templates/"+name+".html")
 
 		if err != nil {
@@ -283,8 +287,14 @@ func (c *console) authed(h func(http.ResponseWriter, *http.Request, sess)) http.
 // authedForm wraps a form handler: it also needs the session's CSRF token
 // in the form, on top of httpd's same-origin check.
 func (c *console) authedForm(h func(http.ResponseWriter, *http.Request, sess)) http.HandlerFunc {
+	return c.authedFormMax(maxForm, h)
+}
+
+// authedFormMax is authedForm for a form whose body may be up to limit
+// bytes.
+func (c *console) authedFormMax(limit int64, h func(http.ResponseWriter, *http.Request, sess)) http.HandlerFunc {
 	return c.authed(func(w http.ResponseWriter, r *http.Request, s sess) {
-		r.Body = http.MaxBytesReader(w, r.Body, maxForm)
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "malformed form", http.StatusBadRequest)

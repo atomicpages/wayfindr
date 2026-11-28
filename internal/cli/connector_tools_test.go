@@ -38,8 +38,8 @@ func toolsDaemon(t *testing.T, list admin.ToolList) Host {
 
 func TestConnectorToolsPrintsTheTableAndJSON(t *testing.T) {
 	list := admin.ToolList{Connector: "gmail", Tools: []admin.ToolEntry{
-		{Name: "create_draft", Class: "write", Exposed: true},
-		{Name: "get_thread", Class: "read", Exposed: true},
+		{Name: "create_draft", Class: "write", Exposed: true, RequiredArgs: 2},
+		{Name: "get_thread", Class: "read", Exposed: true, RequiredArgs: 1},
 		{Name: "send_message", Class: "write"},
 	}}
 	host := toolsDaemon(t, list)
@@ -49,10 +49,10 @@ func TestConnectorToolsPrintsTheTableAndJSON(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0; stderr: %s", code, stderr.String())
 	}
 
-	want := `TOOL          CLASS  EXPOSED
-create_draft  write  yes
-get_thread    read   yes
-send_message  write  no
+	want := `TOOL          CLASS  EXPOSED  REQUIRED ARGS
+create_draft  write  yes      2
+get_thread    read   yes      1
+send_message  write  no       0
 
 2 of 3 tools exposed.
 `
@@ -106,9 +106,9 @@ func TestConnectorToolsReplacesControlCharactersInNames(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0; stderr: %s", code, stderr.String())
 	}
 
-	want := "TOOL        CLASS  EXPOSED\n" +
-		"red\uFFFD[31m    read   yes\n" +
-		"read\uFFFDetirw  read   no\n" +
+	want := "TOOL        CLASS  EXPOSED  REQUIRED ARGS\n" +
+		"red\uFFFD[31m    read   yes      0\n" +
+		"read\uFFFDetirw  read   no       0\n" +
 		"\n1 of 2 tools exposed.\n"
 
 	if diff := cmp.Diff(want, stdout.String()); diff != "" {

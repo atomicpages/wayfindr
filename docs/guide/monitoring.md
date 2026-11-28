@@ -179,18 +179,19 @@ wayfindr connector tools gmail
 ```
 
 ```text
-TOOL           CLASS        EXPOSED
-create_draft   write        yes
-delete_thread  destructive  no
-get_thread     read         yes
-send_message   write        no
+TOOL           CLASS        EXPOSED  REQUIRED ARGS
+create_draft   write        yes      2
+delete_thread  destructive  no       1
+get_thread     read         yes      1
+send_message   write        no       3
 
 2 of 4 tools exposed.
 ```
 
 This lists every tool the upstream serves now, its class from the upstream's
-annotations, and whether the connector's tools list lets agents see it. Use it
-to write a [tools list](./access/tools-lists). `wayfindr status` shows the same
+annotations, whether the connector's tools list lets agents see it, and how
+many arguments it requires. Use it to write a [tools list](./access/tools-lists),
+or pick a tool to [try by hand](./testing-tools). `wayfindr status` shows the same
 count as `38 (4 hidden)`. See
 [`wayfindr connector tools`](/reference/cli#wayfindr-connector-tools).
 

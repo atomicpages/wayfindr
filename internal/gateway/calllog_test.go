@@ -307,13 +307,11 @@ func TestOnSearchFiresOncePerSearchTools(t *testing.T) {
 	}
 }
 
-// TestCallCoreServesAnyDoorAsCallToolDoes: callCore, given the options
-// call_tool would build, returns what call_tool returns and records the
-// same call-log row, but for the client and token names it was given.
-// It drives callCore through export_test.go's CallCore, a deliberate seam
-// exception the call-core plan asked for, until `wayfindr call` is the
-// second door.
-func TestCallCoreServesAnyDoorAsCallToolDoes(t *testing.T) {
+// TestCallServesAnyDoorAsCallToolDoes: Call, the entry point of the
+// other doors, given the options call_tool would build, returns what
+// call_tool returns and records the same call-log row, but for the client
+// and token names it was given.
+func TestCallServesAnyDoorAsCallToolDoes(t *testing.T) {
 	rec := &recorder{}
 	e := newEnvWith(t, envOptions{
 		fakes: map[string][]fakeupstream.Option{
@@ -352,29 +350,29 @@ func TestCallCoreServesAnyDoorAsCallToolDoes(t *testing.T) {
 				args, _ = json.Marshal(a)
 			}
 
-			viaCore := e.gateway.CallCore(t.Context(), gateway.CallRequest{Name: name, Args: args}, opts)
+			viaCore := e.gateway.Call(t.Context(), gateway.CallRequest{Name: name, Args: args}, opts)
 			fromCore := rec.take()
 
 			if diff := cmp.Diff(asJSON(t, viaMCP), asJSON(t, viaCore)); diff != "" {
-				t.Errorf("result (-call_tool +callCore):\n%s", diff)
+				t.Errorf("result (-call_tool +Call):\n%s", diff)
 			}
 
 			if len(fromMCP) != 1 || len(fromCore) != 1 {
-				t.Fatalf("recorded %d calls through call_tool and %d through callCore, want 1 each", len(fromMCP), len(fromCore))
+				t.Fatalf("recorded %d calls through call_tool and %d through Call, want 1 each", len(fromMCP), len(fromCore))
 			}
 
 			if got := fromCore[0]; got.Client != "wayfindr-cli" || got.TokenName != "admin" {
-				t.Errorf("callCore recorded client %q, token %q, want wayfindr-cli, admin", got.Client, got.TokenName)
+				t.Errorf("Call recorded client %q, token %q, want wayfindr-cli, admin", got.Client, got.TokenName)
 			}
 
 			if (fromMCP[0].Duration != nil) != (fromCore[0].Duration != nil) {
-				t.Errorf("Duration set through call_tool %v, through callCore %v, want the same", fromMCP[0].Duration != nil, fromCore[0].Duration != nil)
+				t.Errorf("Duration set through call_tool %v, through Call %v, want the same", fromMCP[0].Duration != nil, fromCore[0].Duration != nil)
 			}
 
 			ignore := cmpopts.IgnoreFields(store.Call{}, "Client", "TokenName", "StartedAt", "Duration")
 
 			if diff := cmp.Diff(fromMCP[0], fromCore[0], ignore); diff != "" {
-				t.Errorf("call log row (-call_tool +callCore):\n%s", diff)
+				t.Errorf("call log row (-call_tool +Call):\n%s", diff)
 			}
 		})
 	}
@@ -398,16 +396,16 @@ func asJSON(t *testing.T, res *mcp.CallToolResult) string {
 	return string(b)
 }
 
-// TestCallCoreRefusesACallWithoutNarrow: Narrow is required, and a door
+// TestCallRefusesACallWithoutNarrow: Narrow is required, and a door
 // that leaves it out is refused as a request with no Client is, never
 // served unnarrowed.
-func TestCallCoreRefusesACallWithoutNarrow(t *testing.T) {
+func TestCallRefusesACallWithoutNarrow(t *testing.T) {
 	rec := &recorder{}
 	e := newEnvWith(t, envOptions{
 		fakes:   map[string][]fakeupstream.Option{"linear": {fakeupstream.WithTools(createIssue())}},
 		gateway: gateway.Options{Calls: rec},
 	})
-	res := e.gateway.CallCore(t.Context(),
+	res := e.gateway.Call(t.Context(),
 		gateway.CallRequest{Name: "linear.create_issue", Args: json.RawMessage(`{"title":"x"}`)},
 		gateway.CallOptions{Client: clienttoken.Default()})
 

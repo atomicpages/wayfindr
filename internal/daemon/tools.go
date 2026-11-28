@@ -58,11 +58,36 @@ func adminTools(l toolLister, policy func(connector string) config.ToolPolicy) f
 			}
 
 			class := config.ClassOf(lt.Annotations)
-			list.Tools = append(list.Tools, admin.ToolEntry{Name: lt.Name, Class: string(class), Exposed: p.Exposes(lt.Name, class), Definition: def})
+			list.Tools = append(list.Tools, admin.ToolEntry{
+				Name: lt.Name, Class: string(class), Exposed: p.Exposes(lt.Name, class),
+				RequiredArgs: requiredArgs(def), Definition: def,
+			})
 		}
 
 		slices.SortFunc(list.Tools, func(a, b admin.ToolEntry) int { return strings.Compare(a.Name, b.Name) })
 
 		return list, nil
 	}
+}
+
+// requiredArgs counts the distinct names a tool definition's
+// inputSchema.required lists; 0 when it lists none or doesn't decode.
+func requiredArgs(definition json.RawMessage) int {
+	var d struct {
+		InputSchema struct {
+			Required []string `json:"required"`
+		} `json:"inputSchema"`
+	}
+
+	if json.Unmarshal(definition, &d) != nil {
+		return 0
+	}
+
+	seen := make(map[string]struct{}, len(d.InputSchema.Required))
+
+	for _, r := range d.InputSchema.Required {
+		seen[r] = struct{}{}
+	}
+
+	return len(seen)
 }

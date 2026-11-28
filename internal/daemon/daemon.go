@@ -506,6 +506,7 @@ func New(ctx context.Context, opts Options) (d *Daemon, err error) {
 		CallRetention: calls.Retention,
 		Search:        adminSearch(gw),
 		Tools:         adminTools(manager, cfgState.toolPolicy),
+		Call:          adminCall(gw, clienttoken.Digest(token), registry),
 		Tokens:        tokens,
 		OAuth:         oauthRequests{server: oauth, tokens: tokens},
 		UILogin: func() admin.UILogin {

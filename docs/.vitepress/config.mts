@@ -83,6 +83,7 @@ export default defineConfig({
               link: "/guide/authentication-unattended",
             },
             { text: "Secrets", link: "/guide/secrets" },
+            { text: "Testing a Tool", link: "/guide/testing-tools" },
           ],
         },
         {

@@ -263,20 +263,27 @@ type connectorView struct {
 	ToolsError string
 }
 
-// toolRow is one tool on a connector page: the listing's entry and its
-// definition indented for reading, or "" when there is none.
+// toolRow is one tool on a connector page: the listing's entry, its
+// definition indented for reading, or "" when there is none, and the path
+// of its form, for an exposed tool only.
 type toolRow struct {
 	admin.ToolEntry
 	Spec string
+	Try  string
 }
 
 // toolRows indents each tool's definition. One that isn't valid JSON gets
-// no Spec, so its row shows no definition rather than garbage.
-func toolRows(tools []admin.ToolEntry) []toolRow {
+// no Spec, so its row shows no definition rather than garbage. An exposed
+// tool links to its form; a hidden one doesn't, since agents can't call it.
+func toolRows(connector string, tools []admin.ToolEntry) []toolRow {
 	rows := make([]toolRow, len(tools))
 
 	for i, t := range tools {
 		rows[i].ToolEntry = t
+
+		if t.Exposed {
+			rows[i].Try = "/ui/connectors/" + url.PathEscape(connector) + "/tools/" + url.PathEscape(t.Name)
+		}
 
 		var buf bytes.Buffer
 
@@ -312,7 +319,7 @@ func (c *console) connector(w http.ResponseWriter, r *http.Request, s sess) {
 	if list, err := c.Admin.Tools(r.Context(), name); err != nil {
 		_, body.ToolsError = c.message(r, err)
 	} else {
-		body.Tools = toolRows(list.Tools)
+		body.Tools = toolRows(name, list.Tools)
 	}
 
 	v.Parent, v.ParentHref = "Connectors", "/ui/"

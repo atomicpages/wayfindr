@@ -25,6 +25,9 @@ type ToolEntry struct {
 	// Exposed is whether the connector's tools list lets agents see and
 	// call it.
 	Exposed bool `json:"exposed"`
+	// RequiredArgs is how many arguments the definition's inputSchema
+	// requires.
+	RequiredArgs int `json:"required_args"`
 	// Definition is the tool as the upstream serves it, in MCP's wire form
 	// (name, description, inputSchema, annotations, ...), re-encoded by the
 	// SDK, so its keys may be in another order.

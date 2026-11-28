@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -25,7 +26,8 @@ func newConnectorToolsCmd(host Host) *cobra.Command {
 		Short: "List a connector's tools and which ones its tools list exposes",
 		Long: `Ask the running daemon for every tool the connector's upstream serves now,
 with the tool's class and whether the connector's tools list exposes it to
-agents. Use it to write the tools list of [connectors.<name>].
+agents, and how many arguments it requires. Use it to write the tools list of
+[connectors.<name>], or to pick a tool to try with ` + "`wayfindr call`" + `.
 
 The class comes from the upstream's annotations: read (readOnlyHint), write
 (destructiveHint false), or destructive (everything else, including tools
@@ -77,7 +79,7 @@ func writeToolsTable(w io.Writer, list admin.ToolList) error {
 		fmt.Fprintf(&b, "%s serves no tools.\n", list.Connector)
 	} else {
 		tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-		rows := []string{"TOOL\tCLASS\tEXPOSED"}
+		rows := []string{"TOOL\tCLASS\tEXPOSED\tREQUIRED ARGS"}
 		exposed := 0
 
 		for _, t := range list.Tools {
@@ -88,7 +90,7 @@ func writeToolsTable(w io.Writer, list admin.ToolList) error {
 				exposed++
 			}
 
-			rows = append(rows, redact.Printable(t.Name)+"\t"+t.Class+"\t"+mark)
+			rows = append(rows, redact.Printable(t.Name)+"\t"+t.Class+"\t"+mark+"\t"+strconv.Itoa(t.RequiredArgs))
 		}
 
 		// A tabwriter over a bytes.Buffer cannot fail.

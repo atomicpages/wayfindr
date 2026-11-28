@@ -22,7 +22,11 @@ func TestToolsListHidesToolsAndAReloadAppliesIt(t *testing.T) {
 	h := newHost(t)
 	files := stdioConnector(t, fakeupstream.V20251125, fakeupstream.WithTools(
 		&mcp.Tool{Name: "read_file", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
-		&mcp.Tool{Name: "write_file"},
+		&mcp.Tool{Name: "write_file", InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"path": map[string]any{"type": "string"}, "text": map[string]any{"type": "string"}},
+			"required":   []any{"path", "text"},
+		}},
 	))
 	addr := freeAddr(t)
 	files["tools"] = []string{"@read"}
@@ -41,7 +45,7 @@ func TestToolsListHidesToolsAndAReloadAppliesIt(t *testing.T) {
 
 	want := admin.ToolList{Connector: "files", Tools: []admin.ToolEntry{
 		{Name: "read_file", Class: "read", Exposed: true},
-		{Name: "write_file", Class: "destructive"},
+		{Name: "write_file", Class: "destructive", RequiredArgs: 2},
 	}}
 
 	if diff := cmp.Diff(want, list, cmpopts.IgnoreFields(admin.ToolEntry{}, "Definition")); diff != "" {

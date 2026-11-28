@@ -49,11 +49,11 @@ wayfindr connector tools gmail
 ```
 
 ```
-TOOL           CLASS        EXPOSED
-create_draft   write        yes
-delete_thread  destructive  no
-get_thread     read         yes
-send_message   write        no
+TOOL           CLASS        EXPOSED  REQUIRED ARGS
+create_draft   write        yes      2
+delete_thread  destructive  no       1
+get_thread     read         yes      1
+send_message   write        no       3
 
 2 of 4 tools exposed.
 ```

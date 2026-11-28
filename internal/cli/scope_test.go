@@ -91,10 +91,10 @@ func TestScopeWithAConnectorANDsTheToolsLists(t *testing.T) {
 	}
 
 	_, rest, _ := strings.Cut(stdout.String(), "\n\n")
-	want := `TOOL          CLASS  EXPOSED
-create_draft  write  no
-get_thread    read   yes
-send_message  write  no
+	want := `TOOL          CLASS  EXPOSED  REQUIRED ARGS
+create_draft  write  no       0
+get_thread    read   yes      0
+send_message  write  no       0
 
 1 of 3 tools exposed.
 `
@@ -203,11 +203,11 @@ func TestScopeWithAProfileAndAConnectorANDsAllThreeToolsLists(t *testing.T) {
 	}
 
 	head, rest, _ := strings.Cut(stdout.String(), "\n\n")
-	want := `TOOL          CLASS  EXPOSED
-create_draft  write  no
-get_thread    read   no
-list_labels   read   yes
-send_message  write  no
+	want := `TOOL          CLASS  EXPOSED  REQUIRED ARGS
+create_draft  write  no       0
+get_thread    read   no       0
+list_labels   read   yes      0
+send_message  write  no       0
 
 1 of 4 tools exposed.
 `

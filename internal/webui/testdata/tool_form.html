@@ -1,0 +1,81 @@
+<main class="content" id="main">
+
+<div class="page-head">
+  <div>
+    <h1>linear.create_issue</h1>
+    <p><span class="badge cls-write">write</span> Run one real call through Wayfindr, as your agent would, with your
+      own access. It is recorded in the call log.</p>
+    <p class="muted">Create a &lt;b&gt;Linear&lt;/b&gt; issue.</p>
+  </div>
+</div>
+
+
+
+
+<form class="card add-form" method="post">
+  <input type="hidden" name="csrf" value="CSRF">
+  <div class="card-head"><div><h2>Arguments</h2><p>Objects and arrays take JSON. An empty optional field is left out.</p></div></div>
+  <div class="card-body form spaced">
+    
+<label class="field" for="arg-0"><span>team <span class="muted">string, required</span></span>
+  
+  <input id="arg-0" name="arg.team" type="text" value="" autocomplete="off" spellcheck="false" required>
+  
+  <small class="hint">The team&#39;s key.</small>
+</label>
+
+<label class="field" for="arg-1"><span>title <span class="muted">string, required</span></span>
+  
+  <input id="arg-1" name="arg.title" type="text" value="" autocomplete="off" spellcheck="false" required>
+  
+  
+</label>
+
+<label class="field" for="arg-2"><span>priority <span class="muted">integer</span></span>
+  
+  <input id="arg-2" name="arg.priority" type="number" step="1" value="" autocomplete="off">
+  
+  
+</label>
+
+<label class="field" for="arg-3"><span>state <span class="muted">choice</span></span>
+  
+  <select id="arg-3" name="arg.state">
+    <option value="">—</option><option value="&#34;todo&#34;">todo</option><option value="&#34;done&#34;">done</option>
+  </select>
+  
+  
+</label>
+
+<label class="field" for="arg-4"><span>urgent <span class="muted">boolean</span></span>
+  
+  <select id="arg-4" name="arg.urgent">
+    <option value="">—</option><option value="true">true</option><option value="false">false</option>
+  </select>
+  
+  
+</label>
+
+<label class="field" for="arg-5"><span>labels <span class="muted">array</span></span>
+  
+  <textarea id="arg-5" name="arg.labels" rows="3" spellcheck="false" placeholder="JSON"></textarea>
+  
+  <small class="hint">Label names.</small>
+</label>
+
+<label class="field" for="arg-6"><span>notify <span class="muted">boolean, required</span></span>
+  
+  <select id="arg-6" name="arg.notify" required>
+    <option value="">—</option><option value="true">true</option><option value="false">false</option>
+  </select>
+  
+  
+</label>
+
+    <div class="actions">
+      <button class="btn btn-destructive" type="submit">Run — write</button>
+    </div>
+  </div>
+</form>
+
+    </main>

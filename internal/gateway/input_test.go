@@ -389,15 +389,14 @@ func TestCallToolRefusesAStateFromAnotherToken(t *testing.T) {
 	}
 }
 
-// TestCallCoreBindsTheStateToTheTokenInstance: a request state is bound to
+// TestCallBindsTheStateToTheTokenInstance: a request state is bound to
 // the instance of the client token whose call was asked, not only its
 // name. Revoking a token frees its name, so a token re-created under it
 // within the state's lifetime is refused, and its refused answer leaves
 // the question for the token it was put to. The asked token's own refused
-// answer does discard it. Driven through CallCore (export_test.go), a
-// deliberate seam exception the call-core plan asked for: no MCP request
-// can carry two instances of one name.
-func TestCallCoreBindsTheStateToTheTokenInstance(t *testing.T) {
+// answer does discard it. Driven through Call, the other doors' entry
+// point: no MCP request can carry two instances of one name.
+func TestCallBindsTheStateToTheTokenInstance(t *testing.T) {
 	// A 2025-11-25 upstream parks its question, so a discard is observable:
 	// until it, a new question is declined as ambiguous.
 	e := newEnv(t, map[string][]fakeupstream.Option{"linear": {fakeupstream.WithElicitation(), fakeupstream.WithTools(createIssue())}})
@@ -422,12 +421,12 @@ func TestCallCoreBindsTheStateToTheTokenInstance(t *testing.T) {
 	// ask puts a new question to c and returns its state and answer.
 	ask := func(t *testing.T, c clienttoken.Client) *gateway.Resume {
 		t.Helper()
-		res := e.gateway.CallCore(t.Context(), elicit, optsFor(c))
+		res := e.gateway.Call(t.Context(), elicit, optsFor(c))
 
 		// NeedsInput reads the resultType the SDK sets on the wire, which a
 		// result straight from callCore doesn't have yet.
 		if len(res.InputRequests) == 0 || res.RequestState == "" {
-			t.Fatalf("CallCore = %+v, want input_required", res)
+			t.Fatalf("Call = %+v, want input_required", res)
 		}
 
 		r := &gateway.Resume{State: res.RequestState, Responses: mcp.InputResponseMap{}}
@@ -444,7 +443,7 @@ func TestCallCoreBindsTheStateToTheTokenInstance(t *testing.T) {
 		req := elicit
 		req.Resume = r
 
-		return e.gateway.CallCore(t.Context(), req, optsFor(c))
+		return e.gateway.Call(t.Context(), req, optsFor(c))
 	}
 
 	wantRefusedState := func(t *testing.T, res *mcp.CallToolResult) {
@@ -476,14 +475,14 @@ func TestCallCoreBindsTheStateToTheTokenInstance(t *testing.T) {
 	t.Run("its own token's refused answer discards the question", func(t *testing.T) {
 		r := ask(t, asked)
 		other := gateway.CallRequest{Name: "linear.create_issue", Args: json.RawMessage(`{"title":"x"}`), Resume: r}
-		wantRefusedState(t, e.gateway.CallCore(t.Context(), other, optsFor(asked)))
+		wantRefusedState(t, e.gateway.Call(t.Context(), other, optsFor(asked)))
 
 		// The upstream's call ends once told cancel; until then, a new
 		// question would be declined as ambiguous.
 		deadline := time.Now().Add(5 * time.Second)
 
 		for {
-			res := e.gateway.CallCore(t.Context(), elicit, optsFor(asked))
+			res := e.gateway.Call(t.Context(), elicit, optsFor(asked))
 
 			if len(res.InputRequests) > 0 {
 				wantAnswered(t, answer(t, asked, &gateway.Resume{State: res.RequestState, Responses: r.Responses}))
@@ -492,7 +491,7 @@ func TestCallCoreBindsTheStateToTheTokenInstance(t *testing.T) {
 			}
 
 			if time.Now().After(deadline) {
-				t.Fatalf("CallCore after the refusal = %+v, want input_required", res)
+				t.Fatalf("Call after the refusal = %+v, want input_required", res)
 			}
 
 			time.Sleep(20 * time.Millisecond)

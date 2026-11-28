@@ -957,6 +957,7 @@ img.brand-logo {
 /* ---------- Forms ---------- */
 input[type="text"],
 input[type="search"],
+input[type="number"],
 select {
   height: 36px;
   padding: 0 0.75rem;
@@ -1819,4 +1820,11 @@ code.user-code {
   .btn {
     transition: none;
   }
+}
+
+/* A tool's link to its form, beside its name on a connector page. */
+a.try {
+  margin-left: 0.5rem;
+  font-size: 12.5px;
+  font-weight: 500;
 }

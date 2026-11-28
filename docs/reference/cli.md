@@ -24,6 +24,7 @@ wayfindr auth login linear    # authorize an OAuth connector
 | [`wayfindr status`](#wayfindr-status)                              | Show each connector's state, tools, and last sync.                                   | Yes, 10 s                                              |
 | [`wayfindr calls`](#wayfindr-calls)                                | Show the tools agents called, newest first.                                          | Yes, 10 s                                              |
 | [`wayfindr search <query>`](#wayfindr-search)                      | Search the catalog as an agent would, and show why.                                  | Yes, 30 s                                              |
+| [`wayfindr call <connector.tool>`](#wayfindr-call)                 | Run one real tool call through the daemon, as an agent would.                        | Yes, 30 s to list the tool, then the connector's       |
 | [`wayfindr ui`](#wayfindr-ui)                                      | Open the web console in the browser, signed in.                                      | Yes, 10 s                                              |
 | [`wayfindr scope [connector]`](#wayfindr-scope)                    | Show the project scope that applies here and what it exposes.                        | Yes, 30 s, if a scope file applies or with `--profile` |
 | [`wayfindr connector add <name>`](#wayfindr-connector-add)         | Add a connector to the config file and report it.                                    | Starts one, unless `--no-wait`                         |
@@ -51,7 +52,7 @@ wayfindr auth login linear    # authorize an OAuth connector
 
 `wayfindr --help` lists the commands in four groups: **Daemon** (`init`,
 `start`, `stop`, `logs`, `service`, `update`), **Inspect** (`status`, `calls`, `search`,
-`scope`, `ui`), **Manage** (`connector`, `auth`, `secret`, `token`,
+`call`, `scope`, `ui`), **Manage** (`connector`, `auth`, `secret`, `token`,
 `config`), and **Plumbing** (`stdio`, `completion`, `version`, `help`).
 
 ## Global flags
@@ -64,7 +65,7 @@ These go before or after the command, as in `wayfindr --json status` or
 | `--config <path>`     | none    | The [config file](./paths-and-environment#config-file). Wins over `WAYFINDR_CONFIG`.                                                                                                                                                                                                                          |
 | `--data-dir <path>`   | none    | The [data directory](./paths-and-environment#data-directory). Wins over `WAYFINDR_DATA_DIR`.                                                                                                                                                                                                                  |
 | `--log-level <level>` | `info`  | Log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`, or `disabled`. Case-insensitive; numbers are not accepted.                                                                                                                                                                            |
-| `--json`              | `false` | Print the result as JSON instead of text. Only the commands that print data take it: `status`, `calls`, `search`, `scope`, `connector list`, `connector tools`, `secret list`, `token list`, `config path`, `version`, and `update --check`. Each one's section says what it prints. Any other command fails. |
+| `--json`              | `false` | Print the result as JSON instead of text. Only the commands that print data take it: `status`, `calls`, `search`, `call`, `scope`, `connector list`, `connector tools`, `secret list`, `token list`, `config path`, `version`, and `update --check`. Each one's section says what it prints. Any other command fails. |
 | `-h`, `--help`        |         | Print the command's help and exit.                                                                                                                                                                                                                                                                            |
 
 `--config` and `--data-dir` act as if `WAYFINDR_CONFIG` and `WAYFINDR_DATA_DIR`
@@ -90,7 +91,9 @@ only the arguments its row in the table above shows.
   wrong number of arguments, and an unknown command or subcommand.
   [`status --check`](#wayfindr-status) also exits `2`, without an `Error:`
   line, when a connector or the config needs attention, and
-  [`update --check`](#wayfindr-update) does when a newer release exists. An unknown
+  [`update --check`](#wayfindr-update) does when a newer release exists.
+  [`call`](#wayfindr-call) exits `1` without an `Error:` line when the tool
+  answered with an error, since it has printed the error. An unknown
   command also prints a suggestion when one is close, then
   `Run 'wayfindr --help' for usage.` (for a subcommand, the group's own
   `--help`, such as `wayfindr connector --help`).
@@ -104,7 +107,7 @@ only the arguments its row in the table above shows.
 
 ### Finding the daemon
 
-`status`, `calls`, `search`, `scope` (when a scope file applies, or with
+`status`, `calls`, `search`, `call`, `scope` (when a scope file applies, or with
 `--profile`), `connector tools`, `auth login`, `auth logout`, `secret set`,
 `secret list`, `secret remove`, `token`, and `connector add`, `edit`, `import`,
 and `remove` once they have started it talk to the running daemon. Each reads
@@ -667,6 +670,100 @@ query is empty, a flag is out of range, `--connector` names a connector that
 isn't configured, or the daemon can't be reached
 ([Finding the daemon](#finding-the-daemon)).
 
+## `wayfindr call`
+
+Run one real call of a tool through the running daemon: the same checks,
+narrowing, and [call log](../guide/monitoring) as an agent's `call_tool`. Use it
+to prove a sign-in works, or to see what a scoped token's agent sees. See
+[Testing a tool before your agent uses it](../guide/testing-tools).
+
+```sh
+wayfindr connector tools linear                     # pick a tool
+wayfindr call linear.create_issue --scaffold > args.json
+wayfindr call linear.create_issue --args-file args.json
+```
+
+| Flag                  | Default | Description                                                                                                         |
+| --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `--args <json>`       | `{}`    | The tool's arguments, a JSON object.                                                                                |
+| `--args-file <path>`  | none    | Read the arguments from a file. `-` reads stdin. Not with `--args`.                                                 |
+| `--scaffold`          | `false` | Print a JSON object of the tool's required arguments to stdout and a table of every argument to stderr, then exit.  |
+| `--token-file <path>` | none    | Run the call as the client token in this file, narrowed to its connectors. `-` reads stdin.                         |
+| `--yes`               | `false` | Run a `write` or `destructive` tool without asking.                                                                 |
+| `--output <file>`     | none    | Also write the whole result, as MCP's JSON, to this file.                                                           |
+
+Without `--token-file` the call runs as you, the owner: every connector, no
+profile, and no scope file. With it, the call runs as that token, and the call
+log names the token. The token is read from the file, never taken as an
+argument, where `ps` and your shell history would see it; the daemon neither
+stores nor logs it. A token the daemon doesn't accept fails with
+`The daemon accepts no client token with that value: it may be mistyped, revoked, or expired.`
+
+**`--scaffold`** prints every required argument with its type's zero value
+(`""`, `0`, `false`, `[]`, `{}`, or an enum's first value), in the order the
+schema lists them, then the table on stderr:
+
+```
+{"team": "", "title": ""}
+  team    string  required  The team's key.
+  title   string  required
+  labels  array             Label names.
+```
+
+Edit the JSON and pass it back with `--args-file`.
+
+**Before the call.** A `read` tool runs at once. A `write` or `destructive` tool
+asks `linear.create_issue is a write tool. Run it? [y/N]`; a no prints
+`Nothing changed.` and exits `0`. `--yes` skips the question, and off a terminal the command fails without it, before anything is
+sent. A tool the connector's [`tools` list](./configuration#tools) hides is not
+asked about: the daemon refuses it, as it does for an agent. A tool the
+connector doesn't serve fails with
+`linear serves no tool called <tool>: list them with wayfindr connector tools linear`.
+
+If the daemon can't list the connector's tools, as when its sign-in broke, the
+call still goes out, so you see the server's own error and the call is in the
+call log. The command prints `linear's tools could not be listed: <reason>`, and
+since the tool's class is unknown it asks as for a destructive tool:
+`The class of linear.create_issue is unknown, so it may change or delete data. Run it? [y/N]`.
+`--scaffold` needs the listing, and fails with its reason.
+
+**Prints** a status line, then the result's content:
+
+```
+ok · 1.4s · 231 B
+Issue ENG-481 created.
+image, 48 KiB
+```
+
+The status is `ok`, or `error` when the tool or Wayfindr answered with an error;
+then the time the call took and the result's size. Text prints as the upstream
+sent it, except that control characters and invalid UTF-8 print as `�` and tabs
+as spaces. Other content prints as one line each: `image, 48 KiB`,
+`audio, …`, `link: <uri>`. A result with no content prints its structured
+content. Over 4 KiB of text, the output stops with
+`… cut at 4 KiB of 12 KiB; pass --output <file> for the whole result.`
+
+**When the server asks for more.** An upstream can ask for input mid-call. A
+form is asked on stdin, field by field (`n` to `Answer? [Y/n]` declines; an
+empty answer skips an optional field). A URL request prints the URL and waits
+for Enter, then answers that you finished. The command then sends your answers
+and prints the final result. If stdin held the arguments or the token, it can't
+ask, and fails.
+
+**`--json`** prints the daemon's response, and leaves any question to you:
+
+| Field        | Meaning                                                                                                                                                         |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `result`     | The `CallToolResult` in MCP's wire form (`content`, `structuredContent`, `isError`; for a question, `resultType: "input_required"`, `inputRequests`, `requestState`). |
+| `class`      | The tool's class: `read`, `write`, or `destructive`. Absent when the catalog has no such tool.                                                                  |
+| `elapsed_ms` | How long the call took, Wayfindr's checks included.                                                                                                             |
+
+**Exit:** `0` when the tool answered, and with `--json` when it asks a question.
+`1` when the tool or Wayfindr answered with an error (the error is printed, with
+no `Error:` line), when the arguments are not a JSON object, the token is
+unknown, or the daemon can't be reached
+([Finding the daemon](#finding-the-daemon)).
+
 ## `wayfindr ui`
 
 Open the daemon's [web console](../guide/console) in the browser, signed in. The
@@ -799,7 +896,7 @@ Tools lists keep their entries as written; the table makes them printable.
 
 With a connector, it prints `dir`, `profile`, and `scope_file` as above, then
 what [`connector tools --json`](#wayfindr-connector-tools) prints, where
-`exposed` is the **EXPOSED** column: `{"dir": …, "connector": "gmail", "tools": [{"name": "create_draft", "class": "write", "exposed": false, "definition": {…}}, …]}`.
+`exposed` is the **EXPOSED** column: `{"dir": …, "connector": "gmail", "tools": [{"name": "create_draft", "class": "write", "exposed": false, "required_args": 2, "definition": {…}}, …]}`.
 
 When no scope file applies and there is no `--profile`, nothing narrows and the
 daemon isn't asked: it prints `dir` with empty `connectors` and `unconfigured`,
@@ -1335,31 +1432,33 @@ The no-config and unsafe-edit cases are the
 ### `wayfindr connector tools`
 
 Ask the running daemon for every tool the connector's upstream serves now, with
-each tool's class and whether the connector's
-[`tools` list](./configuration#tools) exposes it to agents. Use it to
-write that list.
+each tool's class, whether the connector's
+[`tools` list](./configuration#tools) exposes it to agents, and how many
+arguments it requires. Use it to write that list, or to pick a tool to try with
+[`wayfindr call`](#wayfindr-call).
 
 **Prints** one row per tool, sorted by name, then a count:
 
 ```
-TOOL           CLASS        EXPOSED
-create_draft   write        yes
-delete_thread  destructive  no
-get_thread     read         yes
-send_message   write        no
+TOOL           CLASS        EXPOSED  REQUIRED ARGS
+create_draft   write        yes      2
+delete_thread  destructive  no       1
+get_thread     read         yes      1
+send_message   write        no       3
 
 2 of 4 tools exposed.
 ```
 
 **CLASS** comes from the upstream's annotations: `read` (`readOnlyHint`),
 `write` (`destructiveHint: false`), or `destructive` (everything else, including
-tools without annotations). **TOOL** is the name as the upstream sent it, except
+tools without annotations). **REQUIRED ARGS** counts the names in the tool's
+`inputSchema.required`. **TOOL** is the name as the upstream sent it, except
 that control characters (the ESC that starts an escape sequence, tabs, and
 bidirectional controls such as U+202E) and invalid UTF-8 print as `�`, so a name
 can't rewrite your terminal; `--json` keeps the name as sent.
 
 **`--json`** prints
-`{"connector": "gmail", "tools": [{"name": "create_draft", "class": "write", "exposed": true, "definition": {"name": "create_draft", "inputSchema": {…}, …}}, …]}`.
+`{"connector": "gmail", "tools": [{"name": "create_draft", "class": "write", "exposed": true, "required_args": 2, "definition": {"name": "create_draft", "inputSchema": {…}, …}}, …]}`.
 `definition` is the tool as the upstream serves it, in MCP's wire form
 (`name`, `description`, `inputSchema`, `annotations`, and so on). Wayfindr
 re-encodes it, so its keys may come in a different order than the upstream sent them.

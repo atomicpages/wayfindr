@@ -1,0 +1,41 @@
+
+  <input type="hidden" name="csrf" value="CSRF">
+  <input type="hidden" name="request_state" value="sealed-1">
+  <input type="hidden" name="arguments" value="{&#34;team&#34;:&#34;core&#34;,&#34;title&#34;:&#34;T&#34;}">
+  <input type="hidden" name="questions" value="{&#34;linear-1&#34;:{&#34;mode&#34;:&#34;form&#34;,&#34;message&#34;:&#34;linear asks: Which cycle?&#34;,&#34;requestedSchema&#34;:{&#34;type&#34;:&#34;object&#34;,&#34;properties&#34;:{&#34;cycle&#34;:{&#34;type&#34;:&#34;integer&#34;},&#34;note&#34;:{&#34;type&#34;:&#34;string&#34;}},&#34;required&#34;:[&#34;cycle&#34;]}},&#34;linear-2&#34;:{&#34;mode&#34;:&#34;url&#34;,&#34;message&#34;:&#34;linear asks: Connect GitHub.&#34;,&#34;url&#34;:&#34;https://linear.app/connect&#34;}}">
+  <div class="card-head"><div><h2>The server asks for more</h2><p>Answer to finish the call.</p></div></div>
+  <div class="card-body form spaced">
+    
+    <fieldset class="field">
+      <legend>linear asks: Which cycle?</legend>
+      
+      
+<label class="field" for="in-0-0"><span>cycle <span class="muted">integer, required</span></span>
+  
+  <input id="in-0-0" name="in.linear-1.cycle" type="number" step="1" value="" autocomplete="off" required>
+  
+  
+</label>
+
+<label class="field" for="in-0-1"><span>note <span class="muted">string</span></span>
+  
+  <input id="in-0-1" name="in.linear-1.note" type="text" value="" autocomplete="off" spellcheck="false">
+  
+  
+</label>
+
+    </fieldset>
+    
+    <fieldset class="field">
+      <legend>linear asks: Connect GitHub.</legend>
+      <p><a href="https://linear.app/connect" target="_blank" rel="noopener noreferrer">https://linear.app/connect</a></p>
+      <small class="hint">Open the link, finish there, then continue.</small>
+      
+    </fieldset>
+    
+    <div class="actions">
+      <button class="btn btn-primary" type="submit" name="action" value="accept">Continue</button>
+      <button class="btn" type="submit" name="action" value="decline" formnovalidate>Decline</button>
+    </div>
+  </div>
+

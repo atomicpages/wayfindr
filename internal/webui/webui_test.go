@@ -48,6 +48,13 @@ type fakeAdmin struct {
 	statusErr, listErr, publicURLErr error
 	// oauth is the authorization server's side (oauth_test.go).
 	oauth fakeOAuth
+	// toolList, when set, is what Tools answers; callAnswers are what Call
+	// answers in turn (the last repeats), and callReqs what it was asked.
+	toolList    *admin.ToolList
+	toolsErr    error
+	callAnswers []string
+	callErr     error
+	callReqs    []admin.CallRequest
 }
 
 func (f *fakeAdmin) PublicURL(context.Context) (admin.PublicURL, error) {
@@ -121,7 +128,36 @@ func (f *fakeAdmin) Search(context.Context, admin.SearchRequest) (admin.SearchRe
 }
 
 func (f *fakeAdmin) Tools(_ context.Context, c string) (admin.ToolList, error) {
+	if f.toolsErr != nil {
+		return admin.ToolList{}, f.toolsErr
+	}
+
+	if f.toolList != nil {
+		return *f.toolList, nil
+	}
+
 	return admin.ToolList{Connector: c}, nil
+}
+
+func (f *fakeAdmin) Call(_ context.Context, req admin.CallRequest) (admin.CallResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.callReqs = append(f.callReqs, req)
+
+	if f.callErr != nil {
+		return admin.CallResponse{}, f.callErr
+	}
+
+	i := min(len(f.callReqs), len(f.callAnswers)) - 1
+
+	return admin.CallResponse{Result: []byte(f.callAnswers[i]), Class: "write", ElapsedMS: 1400}, nil
+}
+
+func (f *fakeAdmin) calledWith() []admin.CallRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.callReqs
 }
 
 func (f *fakeAdmin) ListTokens(context.Context) (admin.TokenList, error) {

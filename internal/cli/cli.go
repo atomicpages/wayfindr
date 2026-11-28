@@ -199,7 +199,7 @@ func newRootCmd(host Host) *cobra.Command {
 	root.PersistentFlags().Bool(jsonFlag, false, "print the result as JSON (commands that print data)")
 	root.AddCommand(newVersionCmd(), newInitCmd(host), newStartCmd(host), newServeCmd(host))
 	root.AddCommand(newStopCmd(host), newLogsCmd(host))
-	root.AddCommand(newStatusCmd(host), newCallsCmd(host), newSearchCmd(host), newStdioCmd(host))
+	root.AddCommand(newStatusCmd(host), newCallsCmd(host), newSearchCmd(host), newCallCmd(host), newStdioCmd(host))
 	root.AddCommand(newSecretCmd(host), newServiceCmd(host), newAuthCmd(host), newUICmd(host))
 	root.AddCommand(newConnectorCmd(host), newScopeCmd(host), newTokenCmd(host))
 	root.AddCommand(newConfigCmd(host), newUpdateCmd(host))
@@ -217,7 +217,7 @@ func groupCommands(root *cobra.Command) {
 		commands  []string
 	}{
 		{"daemon", "Daemon:", []string{"init", "start", "stop", "logs", "service", "update"}},
-		{"inspect", "Inspect:", []string{"status", "calls", "search", "scope", "ui"}},
+		{"inspect", "Inspect:", []string{"status", "calls", "search", "call", "scope", "ui"}},
 		{"manage", "Manage:", []string{"connector", "auth", "secret", "token", "config"}},
 		{"plumbing", "Plumbing:", []string{"stdio", "version"}},
 	}

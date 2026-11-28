@@ -343,6 +343,14 @@ The connector stays configured.
 You can also select **Sign in** on the connector in the [web console](./console),
 or open its [auth link](#the-auth-link).
 
+To prove the sign-in works, call one of the connector's `read` tools right
+away, as an agent would; see
+[Testing a tool before your agent uses it](./testing-tools):
+
+```sh
+wayfindr call linear.search_issues --args '{"query":"login"}'
+```
+
 The daemon must be running. On a connector with no
 `[auth]` table of type `oauth`, the command refuses, with
 `<name> does not use OAuth: it has no [auth] table of type "oauth".` Run

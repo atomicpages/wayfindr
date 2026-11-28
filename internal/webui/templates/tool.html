@@ -1,0 +1,82 @@
+{{define "field"}}
+<label class="field" for="{{.ID}}"><span>{{.Label}} <span class="muted">{{.Type}}{{if .Required}}, required{{end}}</span></span>
+  {{if eq .Kind "select"}}
+  <select id="{{.ID}}" name="{{.Name}}"{{if .Required}} required{{end}}>
+    {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select>
+  {{else if eq .Kind "number"}}
+  <input id="{{.ID}}" name="{{.Name}}" type="number" step="{{.Step}}" value="{{.Value}}" autocomplete="off"{{if .Required}} required{{end}}>
+  {{else if eq .Kind "json"}}
+  <textarea id="{{.ID}}" name="{{.Name}}" rows="3" spellcheck="false" placeholder="JSON">{{.Value}}</textarea>
+  {{else}}
+  <input id="{{.ID}}" name="{{.Name}}" type="text" value="{{.Value}}" autocomplete="off" spellcheck="false"{{if .Required}} required{{end}}>
+  {{end}}
+  {{with .Description}}<small class="hint">{{.}}</small>{{end}}
+</label>
+{{end}}
+
+{{define "content"}}{{with .Body}}
+<div class="page-head">
+  <div>
+    <h1>{{.Connector}}.{{.Tool}}</h1>
+    <p>{{if .Class}}<span class="badge cls-{{.Class}}">{{.Class}}</span>{{else}}<span class="badge cls-destructive">class unknown</span>{{end}} Run one real call through Wayfindr, as your agent would, with your
+      own access. It is recorded in the call log.</p>
+    {{with .Description}}<p class="muted">{{.}}</p>{{end}}
+  </div>
+</div>
+{{with .ListError}}
+<div class="alert warn" role="alert">{{icon "alert"}}<div><b>The connector's tools could not be listed</b><p>{{code .}}</p>
+    <p>So this tool's class and arguments are unknown. Run it only if you know what it does: it may change or delete data.
+      Its error and the call log show why the listing failed.</p></div></div>
+{{end}}
+{{if .Error}}
+<div class="alert err" role="alert">{{icon "alert"}}<div><b>The call wasn't made</b><p>{{code .Error}}</p></div></div>
+{{end}}
+{{with .Result}}
+<div class="card">
+  <div class="card-head">
+    <div>
+      <h2>{{if .IsError}}The tool answered with an error{{else}}Result{{end}}</h2>
+      <p>{{if .IsError}}<span class="badge err">error</span>{{else}}<span class="badge ok">ok</span>{{end}} {{.Elapsed}} · {{.Size}}</p>
+    </div>
+  </div>
+  <div class="card-body form">
+    {{range .Items}}<pre class="why-text spec">{{.}}</pre>{{else}}<p class="muted">The result has no content.</p>{{end}}
+    {{with .Structured}}<details class="advanced"><summary>Structured content</summary><pre class="why-text spec">{{.}}</pre></details>{{end}}
+  </div>
+</div>
+{{end}}
+{{with .Question}}
+<form class="card add-form" method="post">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <input type="hidden" name="request_state" value="{{.State}}">
+  <input type="hidden" name="arguments" value="{{.Arguments}}">
+  <input type="hidden" name="questions" value="{{.Questions}}">
+  <div class="card-head"><div><h2>The server asks for more</h2><p>Answer to finish the call.</p></div></div>
+  <div class="card-body form spaced">
+    {{range .Requests}}
+    <fieldset class="field">
+      <legend>{{.Message}}</legend>
+      {{if .URL}}<p><a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.URL}}</a></p>
+      <small class="hint">Open the link, finish there, then continue.</small>{{end}}
+      {{range .Fields}}{{template "field" .}}{{end}}
+    </fieldset>
+    {{end}}
+    <div class="actions">
+      <button class="btn btn-primary" type="submit" name="action" value="accept">Continue</button>
+      <button class="btn" type="submit" name="action" value="decline" formnovalidate>Decline</button>
+    </div>
+  </div>
+</form>
+{{end}}
+<form class="card add-form" method="post">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <div class="card-head"><div><h2>Arguments</h2><p>Objects and arrays take JSON. An empty optional field is left out.</p></div></div>
+  <div class="card-body form spaced">
+    {{range .Fields}}{{template "field" .}}{{else}}<p class="muted">This tool takes no arguments.</p>{{end}}
+    <div class="actions">
+      <button class="btn {{if eq .Class "read"}}btn-primary{{else}}btn-destructive{{end}}" type="submit">Run — {{or .Class "class unknown"}}</button>
+    </div>
+  </div>
+</form>
+{{end}}{{end}}

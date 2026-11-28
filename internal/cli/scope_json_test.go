@@ -128,10 +128,10 @@ func TestScopeJSONWithAConnector(t *testing.T) {
 		"profile": "acme",
 		"connector": "gmail",
 		"tools": [
-			{"name": "create_draft", "class": "write", "exposed": false},
-			{"name": "get_thread", "class": "read", "exposed": false},
-			{"name": "list_labels", "class": "read", "exposed": true},
-			{"name": "send_message", "class": "write", "exposed": false}
+			{"name": "create_draft", "class": "write", "exposed": false, "required_args": 0},
+			{"name": "get_thread", "class": "read", "exposed": false, "required_args": 0},
+			{"name": "list_labels", "class": "read", "exposed": true, "required_args": 0},
+			{"name": "send_message", "class": "write", "exposed": false, "required_args": 0}
 		]
 	}`
 

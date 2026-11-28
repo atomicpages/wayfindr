@@ -100,6 +100,13 @@ type Options struct {
 	// checked against its tools list. A listing it can't make is a
 	// *ToolsError. Nil answers with 501.
 	Tools func(ctx context.Context, connector string) (ToolList, error)
+	// Call runs one tool call through the gateway's call path, as the
+	// request's client and, when it carries one, its token, and returns the
+	// result in MCP's wire form with the tool's class. A token that names
+	// no client token is a *CallError. It must neither store nor log the
+	// token. Nil answers POST /admin/tools/call with 501. The daemon adapts
+	// the gateway to it; admin cannot import gateway (design §2).
+	Call func(ctx context.Context, req CallRequest) (CallOutcome, error)
 	// Tokens creates, lists, and revokes scoped client tokens. Nil answers
 	// every /admin/tokens request with 501.
 	Tokens ClientTokens
@@ -145,6 +152,7 @@ const (
 	pathCalls      = "/admin/calls"
 	pathSearch     = "/admin/search"
 	pathTools      = "/admin/tools/"
+	pathCall       = "/admin/tools/call"
 	pathTokens     = "/admin/tokens"
 	pathUILogin    = "/admin/ui/login"
 	pathConnectors = "/admin/connectors"
@@ -169,6 +177,7 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("GET "+pathCalls, a.calls)
 	mux.HandleFunc("POST "+pathSearch, a.search)
 	mux.HandleFunc("GET "+pathTools+"{connector}", a.tools)
+	mux.HandleFunc("POST "+pathCall, a.callTool)
 	mux.HandleFunc("POST "+pathTokens, a.withTokens(a.createToken))
 	mux.HandleFunc("GET "+pathTokens, a.withTokens(a.listTokens))
 	mux.HandleFunc("DELETE "+pathTokens+"/{name}", a.withTokens(a.revokeToken))

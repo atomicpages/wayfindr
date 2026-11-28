@@ -76,7 +76,7 @@
         {{range $i, $t := .Tools}}
         <tr class="{{if not .Exposed}}dim {{end}}{{if .Spec}}has-why{{end}}">
           <td class="name">{{if .Spec}}<details class="why"><summary aria-controls="spec-{{$i}}">{{.Name}}{{icon "chev"}}<span
-                  class="sr">Show the definition</span></summary></details>{{else}}{{.Name}}{{end}}</td>
+                  class="sr">Show the definition</span></summary></details>{{else}}{{.Name}}{{end}}{{with .Try}} <a class="try" href="{{.}}">Try it</a>{{end}}</td>
           <td><span class="badge cls-{{.Class}}">{{.Class}}</span></td>
           <td>{{if .Exposed}}<span class="badge ok"><span class="dot"></span>Exposed</span>{{else}}<span
               class="muted">Hidden by the tools list</span>{{end}}</td>
