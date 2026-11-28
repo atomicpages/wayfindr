@@ -1,7 +1,9 @@
 // Package redact keeps secrets that ride inside URLs out of errors, logs, and
-// stored text (design §9: URL query strings are never logged), and, with
+// stored text (design §9: URL query strings are never logged); with
 // Printable, keeps terminal control sequences out of text printed to a
-// terminal. It is a leaf: it imports only the standard library.
+// terminal; and, with Visible, shows the characters a reader can't see in
+// text the owner decides on. It is a leaf: it imports only the standard
+// library.
 package redact
 
 import (

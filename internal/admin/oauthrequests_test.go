@@ -62,10 +62,10 @@ func (f *fakeOAuth) Get(_ context.Context, id string) (admin.OAuthRequest, error
 	}, nil
 }
 
-func (f *fakeOAuth) Approve(_ context.Context, id, name string, connectors []string) (string, error) {
+func (f *fakeOAuth) Approve(_ context.Context, id, name string, connectors, approval []string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.approvals = append(f.approvals, admin.OAuthApproval{Name: name, Connectors: connectors})
+	f.approvals = append(f.approvals, admin.OAuthApproval{Name: name, Connectors: connectors, Approval: approval})
 
 	if f.approveErr != nil {
 		return "", f.approveErr
@@ -201,6 +201,51 @@ func TestApproveOAuth(t *testing.T) {
 		}
 	})
 
+	t.Run("approval entries reach the server as given", func(t *testing.T) {
+		f := &fakeOAuth{}
+		entries := []string{"@destructive", "linear.delete_*", "!linear.delete_draft"}
+
+		if _, err := serveOAuth(t, f, true).ApproveOAuth(t.Context(), "r1", admin.OAuthApproval{Name: "chatgpt", Connectors: []string{"github", "linear"}, Approval: entries}); err != nil {
+			t.Fatalf("ApproveOAuth: %v", err)
+		}
+
+		want := []admin.OAuthApproval{{Name: "chatgpt", Connectors: []string{"github", "linear"}, Approval: entries}}
+
+		if diff := cmp.Diff(want, f.approvals); diff != "" {
+			t.Errorf("what Approve got (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("an empty approval list reaches the server as none", func(t *testing.T) {
+		f := &fakeOAuth{}
+		st, user := newStore(t)
+		opts := options(t, st, user, &fakeUpstreams{}, admin.ConfigState{Connectors: []string{"github"}, OAuth: config.OAuth{Enabled: true}})
+		opts.OAuth = f
+		_, srv := serve(t, opts)
+		body := `{"name":"chatgpt","connectors":["github"],"approval":[]}`
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/admin/oauth/requests/r1/approve", strings.NewReader(body))
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resp, err := srv.Client().Do(req)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_ = resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("approve with approval [] = %d, want 200", resp.StatusCode)
+		}
+
+		if len(f.approvals) != 1 || f.approvals[0].Approval != nil {
+			t.Errorf("Approve got approval %#v, want nil", f.approvals)
+		}
+	})
+
 	refused := []struct {
 		name     string
 		approval admin.OAuthApproval
@@ -211,6 +256,22 @@ func TestApproveOAuth(t *testing.T) {
 		{"the default token's name", admin.OAuthApproval{Name: "default", Connectors: []string{"github"}}, http.StatusBadRequest, "reserved"},
 		{"no connector", admin.OAuthApproval{Name: "chatgpt"}, http.StatusBadRequest, "a connection needs at least one connector"},
 		{"an unknown connector", admin.OAuthApproval{Name: "chatgpt", Connectors: []string{"nosuch"}}, http.StatusBadRequest, "no connector is called"},
+		{
+			"an approval entry that does not parse", admin.OAuthApproval{Name: "chatgpt", Connectors: []string{"github"}, Approval: []string{"@write", "@read"}},
+			http.StatusBadRequest, `invalid approval rule: approval[1]: "@read": reads cannot be gated`,
+		},
+		{
+			"an approval entry for a connector the grant can't use", admin.OAuthApproval{Name: "chatgpt", Connectors: []string{"github"}, Approval: []string{"github.*", "linear.delete_*"}},
+			http.StatusBadRequest, `an approval entry names connector "linear", which this connection can't use; its connectors: github`,
+		},
+		{
+			"an exemption for a connector the grant can't use", admin.OAuthApproval{Name: "chatgpt", Connectors: []string{"github"}, Approval: []string{"@write", "!linear.create_*"}},
+			http.StatusBadRequest, `an approval entry names connector "linear"`,
+		},
+		{
+			"an approval entry for no configured connector", admin.OAuthApproval{Name: "chatgpt", Connectors: []string{"github"}, Approval: []string{"nosuch.x"}},
+			http.StatusBadRequest, `an approval entry names connector "nosuch"`,
+		},
 	}
 
 	for _, tt := range refused {

@@ -270,6 +270,16 @@ svg.i {
   font-weight: 600;
 }
 
+/* The Approvals count sits in a span that is always there, so a refresh of
+   the approvals page can swap it by id; empty, it takes no room. */
+.nav-item .nav-count {
+  margin-left: auto;
+}
+
+.nav-item .nav-count .count {
+  margin-left: 0;
+}
+
 .daemon-card {
   margin-top: auto;
   border: 1px solid var(--border);
@@ -794,6 +804,18 @@ tbody tr.why-row:hover td {
   max-width: none;
   max-height: 32rem;
   overflow: auto;
+}
+
+/* An approval's arguments are shown whole: no height limit and no scroll
+   box, so nothing the owner approves is out of view. They wrap, never
+   scroll sideways. */
+.why-text.args {
+  max-width: none;
+  margin-top: 6px;
+}
+
+.args-size {
+  margin-top: 6px;
 }
 
 tr.dim td.name {

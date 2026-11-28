@@ -18,6 +18,8 @@ import (
 	"github.com/atomicpages/wayfindr/internal/admin"
 	"github.com/atomicpages/wayfindr/internal/daemon"
 	"github.com/atomicpages/wayfindr/internal/oauthserver"
+	"github.com/atomicpages/wayfindr/internal/store"
+	"github.com/atomicpages/wayfindr/internal/store/drivers"
 	"github.com/atomicpages/wayfindr/internal/webui"
 )
 
@@ -42,6 +44,7 @@ const (
 // TLS server holds.
 type connect struct {
 	r        running
+	h        host
 	clientID string
 	// cookie is the console's session, once signIn has run.
 	cookie *http.Cookie
@@ -79,7 +82,7 @@ func startConnect(t *testing.T, tune ...func(*daemon.Options)) *connect {
 		fn(&opts)
 	}
 
-	return &connect{r: serve(t, h, opts, cfg), clientID: clientID}
+	return &connect{r: serve(t, h, opts, cfg), h: h, clientID: clientID}
 }
 
 // reply is an answer to a request the test made without following redirects.
@@ -436,6 +439,78 @@ func TestConnectAClientEndToEnd(t *testing.T) {
 	if code, body := c.r.initialize(t, granted.Access, requestWays()["tunnel"]); code != http.StatusUnauthorized {
 		t.Errorf("/mcp with the revoked access token = %d %q, want 401", code, body)
 	}
+}
+
+// A grant's approval entries (ADR 0024) go from the approve page's field to
+// the stored grant, checked by the admin API first: a refused entry
+// re-renders the page and creates no grant.
+func TestApproveStoresTheApprovalEntriesOnTheGrant(t *testing.T) {
+	c := startConnect(t)
+	c.signIn(t)
+
+	if _, err := c.r.admin().ArmOAuth(t.Context()); err != nil {
+		t.Fatalf("ArmOAuth: %v", err)
+	}
+
+	id := c.pendingID(t)
+	csrf := csrfIn(t, c.approvePage(t, id).body)
+	post := func(approval string) reply {
+		return c.console(t, http.MethodPost, "/ui/oauth/approve",
+			url.Values{"csrf": {csrf}, "req": {id}, "name": {"chatgpt-test"}, "connector": {"files"}, "approval": {approval}}, nil)
+	}
+
+	for _, tt := range []struct{ name, approval, text string }{
+		{"an entry that does not parse", "@write\r\n@read\r\n", `&#34;@read&#34;: reads cannot be gated`},
+		{"an entry for a connector the grant can't use", "@write\r\nnosuch.delete_*\r\n", `an approval entry names connector &#34;nosuch&#34;, which this connection can&#39;t use`},
+	} {
+		t.Run(tt.name+" is refused and creates no grant", func(t *testing.T) {
+			got := post(tt.approval)
+
+			if got.code != http.StatusBadRequest || got.location != "" || !strings.Contains(got.body, tt.text) {
+				t.Errorf("approve = %d to %q, want 400 with %q in the page: %s", got.code, got.location, tt.text, got.body)
+			}
+
+			if names := c.r.grantNames(t); len(names) != 0 {
+				t.Errorf("grants after a refused approve: %v", names)
+			}
+		})
+	}
+
+	done := post("@write\r\n  files.delete_* \r\n\r\n")
+
+	if done.code != http.StatusSeeOther || codeFrom(t, done.location) == "" {
+		t.Fatalf("approve = %d to %q, want 303 to the client with a code", done.code, done.location)
+	}
+
+	if diff := cmp.Diff([]string{"@write", "files.delete_*"}, c.storedGrant(t, "chatgpt-test").Approval); diff != "" {
+		t.Errorf("the grant's approval entries (-want +got):\n%s", diff)
+	}
+}
+
+// storedGrant reads the grant name from the running daemon's store.
+func (c *connect) storedGrant(t *testing.T, name string) store.OAuthGrant {
+	t.Helper()
+	st, err := drivers.Open(t.Context(), "sqlite", c.h.paths.DBFile())
+
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+
+	defer func() { _ = st.Close() }()
+
+	user, err := st.EnsureUser(t.Context())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := st.GetOAuthGrant(t.Context(), user, name)
+
+	if err != nil {
+		t.Fatalf("GetOAuthGrant %s: %v", name, err)
+	}
+
+	return g
 }
 
 // TestAPendingAuthorizationExpiresWithTheArm: a request the client made while

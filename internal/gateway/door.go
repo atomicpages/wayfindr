@@ -13,12 +13,25 @@ import (
 // route, claims it in its Asker, since its callers take the round trip.
 const NewestProtocolVersion = protocolInputRequired
 
+// CallResponse is what [Gateway.Call] returns: the result, and what a door
+// that isn't /mcp may know beside it.
+type CallResponse struct {
+	// Result is the call's result, as /mcp sends it.
+	Result *mcp.CallToolResult
+	// Approval is the id of the pending approval the call was refused for
+	// (ADR 0024, Kind approval, Case pending), so the owner's CLI and
+	// console can offer to approve it. It is empty for every other outcome,
+	// a denied or expired approval included. It travels Go-side only: /mcp
+	// carries it in the refusal's text, which nothing parses.
+	Approval string
+}
+
 // Call runs one call_tool call through the call path every door shares
 // (design §7.6): the same narrowing, validation, input_required round trip,
 // and call log as /mcp, with the options the door built. It is the entry
 // point of the admin API's call route, which the daemon adapts; /mcp's
 // handler calls the same path.
-func (g *Gateway) Call(ctx context.Context, r CallRequest, opts CallOptions) *mcp.CallToolResult {
+func (g *Gateway) Call(ctx context.Context, r CallRequest, opts CallOptions) CallResponse {
 	return g.callCore(ctx, r, opts)
 }
 

@@ -293,14 +293,15 @@ func TestUpstreamErrorResultIsReturnedUnchanged(t *testing.T) {
 func TestAdviseCoversEveryKindAndCase(t *testing.T) {
 	kinds := []gateway.Kind{
 		gateway.KindInvalidSearch, gateway.KindInvalidName, gateway.KindUnknownTool,
-		gateway.KindInvalidArguments, gateway.KindInternal, gateway.KindCanceled,
+		gateway.KindInvalidArguments, gateway.KindInternal, gateway.KindCanceled, gateway.KindApproval,
 	}
 	cases := []gateway.Case{
 		gateway.CaseMalformedSearch, gateway.CaseMissingQuery, gateway.CaseBadPage, gateway.CaseBadSize,
 		gateway.CaseUnknownConnector, gateway.CaseMissingName, gateway.CaseUnqualified, gateway.CaseNoConnector,
-		gateway.CaseNotInCatalog, gateway.CaseNotObject, gateway.CaseSchemaMismatch, gateway.CaseCatalog,
+		gateway.CaseNotInCatalog, gateway.CaseNotObject, gateway.CaseSchemaMismatch, gateway.CaseAmbiguousArguments, gateway.CaseArgumentsTooLarge, gateway.CaseCatalog,
 		gateway.CaseUpstream, gateway.CaseBadDetail, gateway.CaseBadNames, gateway.CaseNamesConflict,
 		gateway.CaseNoneFound, gateway.CaseHiddenByPolicy, gateway.CaseNoClient,
+		gateway.CaseApprovalPending, gateway.CaseApprovalDenied, gateway.CaseApprovalExpired, gateway.CaseQueueFull,
 	}
 
 	for _, k := range kinds {

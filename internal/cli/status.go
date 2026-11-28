@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/atomicpages/wayfindr/internal/admin"
@@ -65,6 +66,14 @@ otherwise. 1 still means the status could not be read.`,
 				return err
 			}
 
+			// Beside the warnings, but not in the --json body, which is the
+			// daemon's status as it sent it.
+			if !wantJSON(cmd) {
+				if err := writeApprovalsWaiting(cmd.OutOrStdout(), waitingApprovals(ctx, d)); err != nil {
+					return err
+				}
+			}
+
 			if check && needsAttention(s) {
 				return exitWith(cmd, exitUnhealthy)
 			}
@@ -90,6 +99,49 @@ func needsAttention(s admin.Status) bool {
 		return c.State != upstream.StateReady ||
 			slices.ContainsFunc(c.Warnings, func(w admin.Warning) bool { return !w.Note })
 	})
+}
+
+// waitingApprovals is how many approvals wait for the owner's answer: the
+// queue's pending entries. A granted entry waits for the agent, and a denied
+// one for nothing. It is 0 when the queue can't be read: an answer to
+// `status` is not worth failing for a count beside it, and a daemon that
+// can't list approvals has none to show. The error is logged at debug.
+func waitingApprovals(ctx context.Context, d *adminDaemon) int {
+	list, err := d.Approvals(ctx)
+
+	if err != nil {
+		zerolog.Ctx(ctx).Debug().Err(err).Msg("count waiting approvals")
+
+		return 0
+	}
+
+	n := 0
+
+	for _, a := range list.Approvals {
+		if a.State == admin.ApprovalPending {
+			n++
+		}
+	}
+
+	return n
+}
+
+// writeApprovalsWaiting prints "1 approval waiting", and where to see it,
+// when n is above 0, and nothing otherwise.
+func writeApprovalsWaiting(w io.Writer, n int) error {
+	if n == 0 {
+		return nil
+	}
+
+	noun, pronoun := "approvals", "them"
+
+	if n == 1 {
+		noun, pronoun = "approval", "it"
+	}
+
+	_, err := fmt.Fprintf(w, "\n%d %s waiting. Review %s with `wayfindr approvals`.\n", n, noun, pronoun)
+
+	return err
 }
 
 func writeStatusJSON(w io.Writer, s admin.Status) error {

@@ -28,24 +28,34 @@ const (
 type view struct {
 	Title string
 	// Nav is the active sidebar item: connectors, calls, search, tokens,
-	// cloud-agents.
+	// approvals, cloud-agents.
 	Nav string
 	// Parent, when set, is the breadcrumb above Title.
 	Parent, ParentHref string
 	Version            string
 	Listen             string
 	// Need is how many connectors need the user.
-	Need  int
-	CSRF  string
-	Toast string
-	Body  any
+	Need int
+	// Waiting is how many approvals wait for an answer; the sidebar shows
+	// it when it is not zero.
+	Waiting int
+	CSRF    string
+	Toast   string
+	Body    any
 }
 
 // badge is a status pill: a CSS class (ok, warn, err, info) and its word.
 type badge struct{ Class, Label string }
 
-// base fetches the status every page's sidebar shows and starts the view.
+// base fetches the status and the approval count every page's sidebar
+// shows and starts the view.
 func (c *console) base(r *http.Request, s sess, nav, title string) (view, admin.Status, error) {
+	return c.baseWithApprovals(r, s, nav, title, c.sidebarApprovals(r))
+}
+
+// baseWithApprovals is base with the sidebar's count taken from approvals,
+// for the approvals page, which counts from the listing it shows.
+func (c *console) baseWithApprovals(r *http.Request, s sess, nav, title string, approvals []admin.ApprovalRow) (view, admin.Status, error) {
 	st, err := c.Admin.Status(r.Context())
 
 	if err != nil {
@@ -54,6 +64,7 @@ func (c *console) base(r *http.Request, s sess, nav, title string) (view, admin.
 
 	v := shell(r, s, nav, title)
 	v.Version = st.Version
+	v.Waiting = countWaiting(approvals)
 
 	for _, cn := range st.Connectors {
 		if needsUser(cn.State) {
@@ -62,6 +73,21 @@ func (c *console) base(r *http.Request, s sess, nav, title string) (view, admin.
 	}
 
 	return v, st, nil
+}
+
+// sidebarApprovals lists the queue for the sidebar's count. It only decorates a
+// page, so a failing call logs and shows no count rather than taking every
+// page down.
+func (c *console) sidebarApprovals(r *http.Request) []admin.ApprovalRow {
+	list, err := c.Admin.Approvals(r.Context())
+
+	if err != nil {
+		c.Logger.Warn().Err(err).Msg("count waiting approvals for the sidebar")
+
+		return nil
+	}
+
+	return list.Approvals
 }
 
 // shell is a page's frame before the daemon's status is known: what base
@@ -90,6 +116,7 @@ func (c *console) fail(w http.ResponseWriter, r *http.Request, s sess, status in
 		v.Version = st.Version
 	}
 
+	v.Waiting = countWaiting(c.sidebarApprovals(r))
 	c.render(w, status, "error", v)
 }
 
@@ -764,6 +791,10 @@ func toast(r *http.Request) string {
 	switch q.Get("done") {
 	case "signed-out":
 		return "Signed out of " + name + "."
+	case "approved":
+		return "Approved " + name + ". The agent's next identical call runs once."
+	case "denied":
+		return "Denied " + name + ". Matching calls are refused until it expires."
 	case "revoked":
 		return "Revoked " + name + ". Clients using it are refused from their next request."
 	case "added":

@@ -28,11 +28,17 @@ func (s *Store) CreateOAuthGrant(ctx context.Context, g store.OAuthGrant) error 
 		return fmt.Errorf("create oauth grant %s: %w", g.Name, err)
 	}
 
-	res, err := s.db.ExecContext(ctx, `INSERT INTO oauth_grants (user_id, name, client_id, resource, connectors, created_at)
-		SELECT ?1, ?2, ?3, ?4, ?5, ?6
+	approval, err := marshalApproval(g.Approval)
+
+	if err != nil {
+		return fmt.Errorf("create oauth grant %s: approval: %w", g.Name, err)
+	}
+
+	res, err := s.db.ExecContext(ctx, `INSERT INTO oauth_grants (user_id, name, client_id, resource, connectors, created_at, approval)
+		SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
 		WHERE NOT EXISTS (SELECT 1 FROM client_tokens WHERE user_id = ?1 AND name = ?2)
 		ON CONFLICT DO NOTHING`,
-		g.UserID, g.Name, g.ClientID, g.Resource, string(connectors), g.CreatedAt.UnixMilli())
+		g.UserID, g.Name, g.ClientID, g.Resource, string(connectors), g.CreatedAt.UnixMilli(), approval)
 
 	if err != nil {
 		return fmt.Errorf("create oauth grant %s: %w", g.Name, err)
@@ -51,7 +57,7 @@ func (s *Store) CreateOAuthGrant(ctx context.Context, g store.OAuthGrant) error 
 	return nil
 }
 
-const oauthGrantColumns = `name, client_id, resource, connectors, created_at, last_used_at`
+const oauthGrantColumns = `name, client_id, resource, connectors, created_at, last_used_at, approval`
 
 func scanOAuthGrant(userID string, row scanner) (store.OAuthGrant, error) {
 	var (
@@ -59,14 +65,21 @@ func scanOAuthGrant(userID string, row scanner) (store.OAuthGrant, error) {
 		connectors string
 		createdAt  int64
 		lastUsedAt sql.NullInt64
+		approval   sql.NullString
 	)
 
-	if err := row.Scan(&g.Name, &g.ClientID, &g.Resource, &connectors, &createdAt, &lastUsedAt); err != nil {
+	if err := row.Scan(&g.Name, &g.ClientID, &g.Resource, &connectors, &createdAt, &lastUsedAt, &approval); err != nil {
 		return store.OAuthGrant{}, err
 	}
 
 	if err := json.Unmarshal([]byte(connectors), &g.Connectors); err != nil {
 		return store.OAuthGrant{}, fmt.Errorf("%s: connectors: %w", g.Name, err)
+	}
+
+	var err error
+
+	if g.Approval, err = unmarshalApproval(approval); err != nil {
+		return store.OAuthGrant{}, fmt.Errorf("%s: approval: %w", g.Name, err)
 	}
 
 	g.CreatedAt = time.UnixMilli(createdAt)

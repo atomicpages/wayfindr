@@ -59,6 +59,10 @@ type CallOutcome struct {
 	// Class is the tool's class as the catalog has it; empty when the
 	// catalog has no such tool.
 	Class string
+	// Approval is the id of the pending approval the call was refused for
+	// (ADR 0024); empty for any other outcome. Go-side only: the gateway
+	// knows it, and the MCP result carries it only in its text.
+	Approval string
 }
 
 // CallResponse is the answer to POST /admin/tools/call, whatever the call's
@@ -71,6 +75,10 @@ type CallResponse struct {
 	// Class is "read", "write", or "destructive"; absent when the catalog
 	// has no such tool.
 	Class string `json:"class,omitempty"`
+	// Approval is the id of the pending approval the call was refused for
+	// (ADR 0024, Case pending), for `wayfindr approvals approve <id>`;
+	// absent for any other outcome, a denied or expired approval included.
+	Approval string `json:"approval,omitempty"`
 	// ElapsedMS is how long the call took, the gateway's checks included.
 	ElapsedMS int64 `json:"elapsed_ms"`
 }
@@ -183,7 +191,7 @@ func (a api) callTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, CallResponse{Result: out.Result, Class: out.Class, ElapsedMS: time.Since(started).Milliseconds()})
+	writeJSON(w, CallResponse{Result: out.Result, Class: out.Class, Approval: out.Approval, ElapsedMS: time.Since(started).Milliseconds()})
 }
 
 // Call calls POST /admin/tools/call: it runs one tool call through the

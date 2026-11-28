@@ -58,6 +58,9 @@ explains every column and section.
 | `returned more than 16 MiB in one message`, or `response_too_large` in `wayfindr status`                            | [An answer is too large](#an-answer-is-too-large)                                    |
 | The agent says a tool call failed                                                                                   | [The agent says a tool call failed](#the-agent-says-a-tool-call-failed)              |
 | `is hidden by …`, or `asks for the Wayfindr profile …`                                                              | [Scopes, profiles, and tokens](#scopes-profiles-and-tokens)                          |
+| `needs the owner's approval before it runs`, or `2 approvals waiting` in `wayfindr status`                          | [A call waits for your approval](#a-call-waits-for-your-approval)                    |
+| `The owner denied … with these arguments`, or `approval … has expired`                                              | [A call waits for your approval](#a-call-waits-for-your-approval)                    |
+| `… already has 8 open approvals (waiting, approved, or denied)`                                                                       | [A call waits for your approval](#a-call-waits-for-your-approval)                    |
 | `needs your input, but your client …`                                                                               | [Questions from tools](#questions-from-tools)                                        |
 
 ## First-run failures
@@ -409,6 +412,7 @@ RESULT says how each call ended, and the reason after the colon says why:
 | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `tool_error`                                                                                     | The upstream ran the tool and returned its own error.                                                                             | Read the error in the agent's transcript. Wayfindr never logs results, so it doesn't have the message. |
 | `rejected: …`                                                                                    | Wayfindr refused the call without calling the upstream: an unknown tool, arguments that don't match its schema, or a hidden tool. | See [Scopes, profiles, and tokens](#scopes-profiles-and-tokens).                                       |
+| `rejected: pending`, `denied`, `expired`, `queue_full`, `ambiguous`, or `too_large`              | A remote client's call needs your approval, and doesn't have it.                                                                  | Run `wayfindr approvals`; see [A call waits for your approval](#a-call-waits-for-your-approval).        |
 | `failed: timeout`                                                                                | The call outlasted the connector's timeout.                                                                                       | See [A call times out](#a-call-times-out).                                                             |
 | `failed: body` or `message`                                                                      | The upstream answered with more than 16 MiB in one message.                                                                       | See [An answer is too large](#an-answer-is-too-large).                                                 |
 | `failed: unreachable`, `connect_refused`, `connect_timeout`, `spawn_failed`, or `auth_server`    | Wayfindr couldn't reach the upstream or start its command.                                                                        | Run `wayfindr status`; see [Connector states](#connector-states).                                      |
@@ -496,6 +500,51 @@ be changed: revoke it and create another.
 A CLI command found a scoped client token in `WAYFINDR_CLIENT_TOKEN`. Only the
 default client token can use the commands that talk to the daemon. Unset the
 variable, or run the command where the default token applies.
+
+### A call waits for your approval
+
+A remote token or OAuth grant made with
+[approval entries](./access/scoped-tokens#approval-gates) has some calls held
+until you approve them. The agent's call is refused, `wayfindr calls` shows it
+as `rejected` with the reason after the colon, and `wayfindr status` ends with
+`N approvals waiting` while any is unanswered. List them, with each call's full
+arguments:
+
+```sh
+wayfindr approvals
+```
+
+| The agent sees                                                                                              | `wayfindr calls` | What happened and what to do                                                                                                                                                       |
+| ----------------------------------------------------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `slack.post_message needs the owner's approval before it runs (approval a3f2).`                             | `rejected: pending` | The call waits for you. Run `wayfindr approvals approve a3f2`, which shows the call and asks before it approves it (or use the console's Approvals page). The agent has to call again with the same arguments. |
+| `The owner denied slack.post_message with these arguments (approval a3f2).`                                 | `rejected: denied`  | You denied it, and a denial stands until the entry expires, at least an hour. You can still approve it, then the agent calls again. A call with other arguments needs its own approval. |
+| `The owner's approval of slack.post_message with these arguments (approval a3f2) has expired.`              | `rejected: expired` | A waiting call lasts 24 hours, an approved one 1 hour. The agent calls again with the same arguments, which waits for you again. Expiry is best effort: an expired entry may instead read as no entry, and the call waits again. |
+| `slack.post_message needs the owner's approval before it runs, but this client already has 8 open approvals (waiting, approved, or denied), so Wayfindr refused it.` | `rejected: queue_full` | The client has 8 entries, waiting, approved, or denied, and nothing is dropped to make room. Answering doesn't free a place: it frees when an approved call is retried with the same arguments, or when an entry expires. Approve the waiting ones and let the agent retry them. An agent that changes its arguments on every try fills the queue; tell it to retry with the same arguments. |
+| `slack.post_message needs the owner's approval, and its arguments repeat a key in an object or hold text that isn't valid UTF-8, …` | `rejected: ambiguous` | Wayfindr can't hold a call whose arguments read two ways. The agent has to send each key once (keys that differ only in case or Unicode form, such as `ﬁle` and `file`, count as the same key) and only valid UTF-8. |
+| `slack.post_message needs the owner's approval, and its arguments are larger than 64 KiB or nest deeper than 32 levels, …` | `rejected: too_large` | Wayfindr holds only arguments you can read in full. The agent has to send smaller, flatter arguments, for example over several calls. |
+
+`wayfindr call --token-file <file>` runs a call as that token and, for a call
+that waits, prints `To approve it: wayfindr approvals approve <id>`.
+
+Some things that look like a missed approval:
+
+- **The approval didn't run anything.** It lets the agent's *next* call run. The
+  agent has to make the same call again, with the same arguments, within the
+  hour.
+- **The approved call waits again.** It was used already (an approval is used
+  up before the upstream is called, even if the call then fails), or the daemon
+  restarted, which drops every entry: waiting, approved, and denied. Approve the
+  new one. A gated call that was answering a question from its server when the
+  daemon restarted starts again too.
+- **`wayfindr approvals approve <id>` says no approval is waiting.** The id
+  expired, was used, or never existed. Run `wayfindr approvals` for the current
+  ids.
+- **`wayfindr approvals approve <id>` says `not a terminal`.** It asks before it
+  approves, and couldn't ask. Read the call it printed, or run
+  `wayfindr approvals`, then run it again with `--yes`.
+- **Nothing is held that you expected to be.** An entry holds one class only:
+  `@write` doesn't hold `destructive` tools or tools the upstream gave no
+  annotations. See [Approval gates](./access/scoped-tokens#approval-gates).
 
 ## Questions from tools
 

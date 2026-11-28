@@ -125,7 +125,10 @@ wayfindr stdio`), else the entry to add to the harness's config file. All
   it to the user, the client token the call came with (that instance of it: a
   token created again under a revoked one's name is another), the tool, its
   arguments, and a 10-minute expiry, so an answer is applied only to the call
-  that asked.
+  that asked. It also carries the boot id of the process that sealed it and
+  whether its call was gated. A call the approval gate covers, now or when its
+  state was sealed, can use its state once, and only in the process that
+  sealed it: a daemon restart voids it (ADR 0024).
 
 ## Catalog and search
 
@@ -215,7 +218,8 @@ wayfindr stdio`), else the entry to add to the harness's config file. All
   every request, and it is the outer limit of what that client can use: a
   profile or project scope only narrows within it (ADR 0012). An OAuth grant's
   access token is presented the same way and resolves as a remote client token
-  does (ADR 0022). Not to be confused with upstream OAuth tokens.
+  does (ADR 0022). A remote client token can carry an _approval gate_ (ADR
+  0024). Not to be confused with upstream OAuth tokens.
 - **Default client token** — the client token `wayfindr init` generates
   (`wf_…`, in `<data>/client-token` or `WAYFINDR_CLIENT_TOKEN`). It can use
   every connector and the admin API. Its name, in the call log, is
@@ -385,8 +389,9 @@ The terms of ADR 0022. Its limits are in design §7.11.
   one (the others are dropped) and the user approves or denies it there. The
   page shows when it started and the IP the tunnel reported. The browser reaches that page only by the redirect from
   `/oauth/authorize`, on the daemon's loopback address; the console lists no
-  pending authorizations. The Go type is `oauthserver.Request`. Don't call
-  it a _pending request_ or a _consent request_.
+  pending authorizations. The Go type is `oauthserver.Request`. Not a
+  _pending approval_, which holds a gated call for the owner (ADR 0024). Don't
+  call it a _pending request_ or a _consent request_.
 - **OAuth grant** — a cloud agent's access to Wayfindr, which the user
   approved on the console's approve page, limited to the connectors picked
   there and bound to the resource `<public_url>/mcp`. It is a client token to
@@ -399,7 +404,50 @@ The terms of ADR 0022. Its limits are in design §7.11.
   tokens refused until the change is undone, while the authorization server
   is off, `public_url` differs from the one it was approved under, or its
   client is not in `clients`. Not a _grant_, which is how a connector gets
-  its token. Don't call it an _OAuth token_ or _OAuth connection_.
+  its token. Can carry an _approval gate_ (ADR 0024). Don't call it an _OAuth
+  token_ or _OAuth connection_.
+
+## Approval gates
+
+The terms of ADR 0024.
+
+- **Approval gate** — the entries a remote client token or an OAuth grant is
+  created with (`--approval`, or the field on the grant's approve page) that
+  name the calls the owner must approve before they run: a class (`@write` or
+  `@destructive`, each only itself), a connector's tools by name, or an
+  exemption. `@write` covers neither destructive tools nor tools without
+  annotations, which are classed destructive, so `@write` alone leaves the
+  riskiest calls ungated. Fixed at creation, like the connectors list. Only
+  the admin API (the console or `wayfindr approvals`) answers, never the
+  client. It protects only remote clients: refused on any token that isn't
+  remote, since a local agent can approve its own calls with the default token
+  (ADR 0024). Not a _confirm_ or _elicitation_ (ADR 0008), which ask the
+  client. Don't call it an _approval policy_.
+- **Approval rule** — a client's approval entries, parsed: what the gateway
+  asks of each call to decide whether it is gated. Entries that don't parse
+  give no rule, and the client's calls are all gated (fail closed). Not a
+  _tools list_, which hides tools rather than holding calls.
+- **Pending approval** — a gated call the gateway has held in memory, with its
+  arguments, until the owner approves or denies it in the console or with
+  `wayfindr approvals`. It is bound to the client token's instance (that
+  instance of it: a token created again under a revoked one's name is
+  another), the tool, and a digest of the arguments, and gets a short id,
+  which no other call gets for 24 hours after the entry leaves the queue. At
+  most 8 live entries (pending, granted, or denied) per client; a call that
+  would add one more is refused as `queue_full`. A pending one expires after
+  24 hours; once approved it lasts 1 hour. A denial stands until the entry
+  expires, and for at least 1 hour. A gated call's arguments must read one way
+  (no repeated key, keys that look alike by case or Unicode form included, valid UTF-8, nothing after the object), or it is
+  refused as `invalid_arguments`, Case `ambiguous`, and must be at most 64 KiB
+  and 32 levels deep, or it is refused as Case `too_large`. Shown to the owner
+  with its arguments in full and unredacted, as they decode, keys sorted.
+  Never persisted or logged, and a daemon restart drops it.
+  Not a _pending authorization_, which is an OAuth authorization request that
+  the console's approve page claims (ADR 0022).
+- **Spent** — an approval used by the one call it authorized. The next call
+  with the same arguments is gated again. An approval is spent even when the
+  upstream call it allowed fails. Not a spent code or refresh token of an
+  OAuth grant, which is reuse that revokes the grant.
 
 ## Connector states
 
@@ -429,6 +477,22 @@ Exactly one at a time; shown by `wayfindr status` and in `search_tools`'
   - `not_oauth` — the connector has no `[auth]` table of type `oauth`.
   - `not_interactive` — the connector uses an unattended grant, which has
     no auth flow.
+- **Kind `approval`** — the gateway's kind for a call the approval gate held
+  (ADR 0024). The upstream was not called, and the call log records it as
+  `rejected`. The refusal names the pending approval's id, except on
+  `queue_full`. Cases:
+  - `pending` — the call waits for the owner's answer. The first gated call
+    creates the pending approval; a repeat with the same arguments waits on
+    the same one.
+  - `denied` — the owner denied it. Matching calls are refused until it
+    expires.
+  - `expired` — the approval expired before this call, unanswered, unspent,
+    or denied. It is dropped, so the next call asks again. Best effort: an
+    expired entry dropped while making room for another reads as no entry,
+    so the call pends again instead (still fail closed).
+  - `queue_full` — the client already holds 8 live approvals (pending,
+    granted, or denied), so the call was refused without one. None was
+    evicted.
 - **Kinds `conflict`, `unsafe`, and `invalid`** — `config`'s kinds for a
   refused edit of the config file by `wayfindr connector add`, `edit`, or
   `remove`; the file is left as it was. `conflict` Cases:

@@ -40,6 +40,11 @@ type approveView struct {
 	NoSuggestion bool
 	Connectors   []string
 	Picked       map[string]bool
+	// Approval is the approval entries field, one entry per line, refilled
+	// after a refusal. Only the owner's own form fills it: nothing the
+	// client sends (its document, its authorization request) may, since an
+	// entry it chose could leave its risky calls ungated.
+	Approval string
 	// Error is why the last approve was refused.
 	Error string
 	// Arrived is how many connection requests arrived during the arm the
@@ -175,17 +180,20 @@ func (c *console) renderApprove(w http.ResponseWriter, r *http.Request, s sess, 
 }
 
 // approve serves POST /ui/oauth/approve: it creates the grant and sends the
-// browser back to the client with the authorization code. A refused name or
-// connector list, or a taken name, shows the page again, with the request
-// still waiting.
+// browser back to the client with the authorization code. A refused name,
+// connector list, or approval entry, or a taken name, shows the page again,
+// with the request still waiting.
 func (c *console) approve(w http.ResponseWriter, r *http.Request, s sess) {
 	id := r.PostForm.Get("req")
-	name := strings.TrimSpace(r.PostForm.Get("name"))
-	picked := r.PostForm["connector"]
-	dec, err := c.Admin.ApproveOAuth(r.Context(), id, admin.OAuthApproval{Name: name, Connectors: picked})
+	in := approveInput{
+		name:     strings.TrimSpace(r.PostForm.Get("name")),
+		picked:   r.PostForm["connector"],
+		approval: approvalLines(r.PostForm.Get("approval")),
+	}
+	dec, err := c.Admin.ApproveOAuth(r.Context(), id, admin.OAuthApproval{Name: in.name, Connectors: in.picked, Approval: in.approval})
 
 	if err != nil {
-		c.approveRefused(w, r, s, id, name, picked, err)
+		c.approveRefused(w, r, s, id, in, err)
 
 		return
 	}
@@ -193,12 +201,34 @@ func (c *console) approve(w http.ResponseWriter, r *http.Request, s sess) {
 	c.sendBack(w, r, s, dec.Redirect)
 }
 
+// approveInput is what the user entered on the approve page.
+type approveInput struct {
+	name     string
+	picked   []string
+	approval []string
+}
+
+// approvalLines is the approval entries field as entries: one per line,
+// each trimmed, blank lines dropped, so a pasted \r\n leaves no \r in an
+// entry. Nil when none is left.
+func approvalLines(field string) []string {
+	var entries []string
+
+	for line := range strings.Lines(field) {
+		if e := strings.TrimSpace(line); e != "" {
+			entries = append(entries, e)
+		}
+	}
+
+	return entries
+}
+
 // approveRefused shows the approve page again for a 400 or 409, which leave
 // the request claimed, with what the user entered; any other refusal is the
 // error page, a 404 the one that says to start again. A request more than
 // one arrived with (a 409 too) is shown with the page's own words for it,
 // not the refusal's.
-func (c *console) approveRefused(w http.ResponseWriter, r *http.Request, s sess, id, name string, picked []string, err error) {
+func (c *console) approveRefused(w http.ResponseWriter, r *http.Request, s sess, id string, in approveInput, err error) {
 	ae := (*admin.APIError)(nil)
 
 	if !errors.As(err, &ae) || (ae.Status != http.StatusBadRequest && ae.Status != http.StatusConflict) {
@@ -218,7 +248,8 @@ func (c *console) approveRefused(w http.ResponseWriter, r *http.Request, s sess,
 	}
 
 	body := approveFor(c.Now(), req)
-	body.Name, body.Picked = name, pickedSet(picked)
+	body.Name, body.Picked = in.name, pickedSet(in.picked)
+	body.Approval = strings.Join(in.approval, "\n")
 
 	if !body.Contested {
 		body.Error = ae.Error()

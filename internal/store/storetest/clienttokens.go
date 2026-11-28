@@ -60,6 +60,8 @@ func testClientTokensCreateListAndDelete(t *testing.T, newDatabase NewDatabase) 
 	triage := clientToken(user, "nightly-triage", "linear", "github")
 	// Remote is stored as given: set on one token, left false on the other.
 	triage.Remote = true
+	// Approval entries are kept as given and in order, opaque to the store.
+	triage.Approval = []string{"linear.delete_*", "github.merge_pull_request"}
 	// A sub-millisecond creation time is kept to the millisecond.
 	triage.CreatedAt = triage.CreatedAt.Add(456 * time.Microsecond)
 	ci := clientToken(user, "ci", "github")
@@ -71,7 +73,8 @@ func testClientTokensCreateListAndDelete(t *testing.T, newDatabase NewDatabase) 
 	wantTriage.CreatedAt = time.UnixMilli(1_762_000_000_000)
 	wantCI.LastUsedAt = nil
 
-	// Ordered by name; connectors as given; only triage is remote.
+	// Ordered by name; connectors as given; only triage is remote and has
+	// approval entries (ci's read back nil).
 	if diff := cmp.Diff([]store.ClientToken{wantCI, wantTriage}, listClientTokens(t, s, user), cmpopts.EquateApproxTime(0)); diff != "" {
 		t.Fatalf("ListClientTokens (-want +got):\n%s", diff)
 	}
@@ -90,6 +93,19 @@ func testClientTokensCreateListAndDelete(t *testing.T, newDatabase NewDatabase) 
 
 	// The name is free again once its token is deleted.
 	createClientTokens(t, s, ci)
+}
+
+func testClientTokenEmptyApprovalReadsBackNil(t *testing.T, newDatabase NewDatabase) {
+	s, user := newStore(t, newDatabase)
+	tok := clientToken(user, "ci", "github")
+	tok.Approval = []string{}
+	createClientTokens(t, s, tok)
+
+	got := listClientTokens(t, s, user)
+
+	if len(got) != 1 || got[0].Approval != nil {
+		t.Errorf("ListClientTokens = %#v, want one token with nil Approval", got)
+	}
 }
 
 func testCreateClientTokenRefusesADuplicateNameOrDigest(t *testing.T, newDatabase NewDatabase) {

@@ -1,0 +1,58 @@
+<main class="content" id="main">
+
+<div class="page-head">
+  <div>
+    <h1>Approve a connection</h1>
+    <p>ChatGPT asked to use your Wayfindr connectors. Choose which ones it may use, then approve.</p>
+  </div>
+</div>
+
+
+
+
+<form class="card" method="post" action="/ui/oauth/approve" hx-boost="false">
+  <input type="hidden" name="csrf" value="CSRF">
+  <input type="hidden" name="req" value="r1">
+  <div class="card-head">
+    <h2>Who is asking</h2>
+  </div>
+  <dl class="review">
+    <div><dt>Client</dt><dd>ChatGPT</dd></div>
+    <div><dt>Client address</dt><dd><code>chatgpt.com</code></dd></div>
+    <div><dt>Returns to</dt><dd><code>chatgpt.com</code></dd></div>
+    <div><dt>Started</dt><dd>09:58:30 (1 min ago)</dd></div>
+    <div><dt>IP address</dt><dd><code>203.0.113.7</code> <small class="hint">reported by your tunnel</small></dd></div>
+  </dl>
+  <div class="card-body form">
+    
+    <div class="alert warn" role="note"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><div>
+        <p>Approve only if you clicked Connect in ChatGPT in the last few minutes. If someone sent you this link, or this page opened in a tab you didn't open, choose Deny.</p>
+      </div>
+    </div>
+    <label class="field" for="grant-name"><span>Name</span>
+      <input id="grant-name" name="name" type="text" value="chatgpt" autocomplete="off" spellcheck="false" required aria-describedby="grant-name-hint">
+      <small class="hint" id="grant-name-hint">Shows in the call log and in <code>wayfindr token list</code>, so you can tell this connection from others.</small>
+    </label>
+    <fieldset class="field">
+      <legend>Connectors</legend>
+      <div class="options">
+        <label class="check option" for="cc-github"><input type="checkbox" id="cc-github" name="connector"
+            value="github"><span class="mini" aria-hidden="true"><span class="letter">G</span><picture><source srcset="https://cdn.jsdelivr.net/gh/glincker/thesvg@bec352dd80ed68c597d57f3aa599b40eb9ecd4ee/public/icons/github/dark.svg" media="(prefers-color-scheme: dark)"><img class="brand-logo" src="https://cdn.jsdelivr.net/gh/glincker/thesvg@bec352dd80ed68c597d57f3aa599b40eb9ecd4ee/public/icons/github/default.svg" alt="" width="14" height="14" decoding="async"></picture></span>github</label>
+        <label class="check option" for="cc-jira"><input type="checkbox" id="cc-jira" name="connector"
+            value="jira"><span class="mini" aria-hidden="true"><span class="letter">J</span><picture><img class="brand-logo" src="https://cdn.jsdelivr.net/gh/glincker/thesvg@bec352dd80ed68c597d57f3aa599b40eb9ecd4ee/public/icons/jira/default.svg" alt="" width="14" height="14" decoding="async"></picture></span>jira</label>
+        
+      </div>
+    </fieldset>
+    <label class="field" for="grant-approval"><span>Calls that need your approval</span>
+      <textarea id="grant-approval" name="approval" rows="3" autocomplete="off" spellcheck="false" aria-describedby="grant-approval-hint"></textarea>
+      <small class="hint" id="grant-approval-hint">One entry per line; matching calls wait until you approve them in Wayfindr. <code>@write</code> covers tools that change things, <code>@destructive</code> tools that delete or overwrite, <code>github.delete_*</code> tools by name, and <code>!github.delete_draft</code> exempts a tool. <code>@write</code> does not cover destructive tools or tools without annotations: add <code>@destructive</code> for those. Leave it empty for none.</small>
+    </label>
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">Approve</button>
+      <button class="btn btn-destructive" type="submit" formaction="/ui/oauth/deny" formnovalidate>Deny</button>
+    </div>
+    
+  </div>
+</form>
+
+    </main>

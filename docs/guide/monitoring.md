@@ -49,6 +49,11 @@ daemon:
 wayfindr status --check > /dev/null || echo "wayfindr needs attention"
 ```
 
+When remote clients have calls waiting for your
+[approval](./access/scoped-tokens#approval-gates), `status` ends with
+``2 approvals waiting. Review them with `wayfindr approvals`.`` That count isn't
+in `--json` and doesn't change `--check`'s exit code.
+
 - [Troubleshooting](./troubleshooting#connector-states) explains each state and
   [each warning](./troubleshooting#warnings).
 - [`wayfindr status`](/reference/cli#wayfindr-status) has every column, section,
@@ -80,7 +85,10 @@ TIME                  CLIENT       TOKEN           TOOL                  DURATIO
 A `rejected` call never reached the upstream: the agent guessed a tool name that
 doesn't exist, sent arguments that don't match the tool's schema, or called a
 tool that a [tools list, profile, or project scope](./access/#what-agents-see)
-hides. A `failed` call did reach it, or tried to, and the reason says why. The
+hides. It is also what a remote client's call shows when it needs your
+approval and doesn't have it: the reason is `pending`, `denied`, `expired`,
+`queue_full`, `ambiguous`, or `too_large`, and `wayfindr approvals` lists the calls that wait
+([why](./troubleshooting#a-call-waits-for-your-approval)). A `failed` call did reach it, or tried to, and the reason says why. The
 client shows as `-` when it didn't send its name. The token is `default` or the
 name of a [scoped client token](./access/scoped-tokens); the client can't choose
 it.

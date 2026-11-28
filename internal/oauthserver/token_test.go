@@ -143,7 +143,7 @@ func TestTokenExchangeRefusesAShortVerifierThatMatches(t *testing.T) {
 	q := h.query()
 	q.Set("code_challenge", base64.RawURLEncoding.EncodeToString(sum[:]))
 
-	redirect, err := h.srv.Approve(t.Context(), h.claimedID(t, q), "chatgpt", []string{"github"})
+	redirect, err := h.srv.Approve(t.Context(), h.claimedID(t, q), "chatgpt", []string{"github"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +545,7 @@ func TestExchangeForAGrantReCreatedUnderTheNameIssuesNothing(t *testing.T) {
 
 	h.clock.Advance(time.Second)
 
-	if _, err := h.srv.Approve(t.Context(), h.claimedID(t, h.query()), "chatgpt", []string{"github"}); err != nil {
+	if _, err := h.srv.Approve(t.Context(), h.claimedID(t, h.query()), "chatgpt", []string{"github"}, nil); err != nil {
 		t.Fatalf("Approve of the new grant: %v", err)
 	}
 

@@ -13,7 +13,7 @@ import (
 )
 
 func nightly() clienttoken.Client {
-	return clienttoken.Client{Name: "nightly", Connectors: []string{"github", "linear"}}
+	return clienttoken.Client{Name: "nightly", Connectors: []string{"github", "linear"}, Approval: []string{"github.merge_*", "linear.delete_*"}}
 }
 
 // clock returns a now func that answers each time in turn, then the last.
@@ -81,9 +81,11 @@ func TestRegistryLookupReturnsCopy(t *testing.T) {
 	c := nightly()
 	r := clienttoken.NewRegistry(map[[sha256.Size]byte]clienttoken.Client{d: c}, nil)
 	c.Connectors[0] = "gmail" // the caller's map value must not reach r
+	c.Approval[0] = "gmail.*"
 
 	got, _ := r.Lookup(d)
 	got.Connectors[1] = "slack"
+	got.Approval[1] = "slack.*"
 
 	again, _ := r.Lookup(d)
 

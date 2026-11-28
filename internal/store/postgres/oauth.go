@@ -34,11 +34,11 @@ func (s *Store) CreateOAuthGrant(ctx context.Context, g store.OAuthGrant) error 
 		return fmt.Errorf("create oauth grant %s: %w", g.Name, err)
 	}
 
-	tag, err := tx.Exec(ctx, `INSERT INTO oauth_grants (user_id, name, client_id, resource, connectors, created_at)
-		SELECT $1::uuid, $2::text, $3::text, $4::text, $5::text[], $6::timestamptz
+	tag, err := tx.Exec(ctx, `INSERT INTO oauth_grants (user_id, name, client_id, resource, connectors, created_at, approval)
+		SELECT $1::uuid, $2::text, $3::text, $4::text, $5::text[], $6::timestamptz, $7::text[]
 		WHERE NOT EXISTS (SELECT 1 FROM client_tokens WHERE user_id = $1 AND name = $2)
 		ON CONFLICT DO NOTHING`,
-		g.UserID, g.Name, g.ClientID, g.Resource, g.Connectors, g.CreatedAt.Truncate(time.Millisecond))
+		g.UserID, g.Name, g.ClientID, g.Resource, g.Connectors, g.CreatedAt.Truncate(time.Millisecond), approvalArg(g.Approval))
 
 	if err != nil {
 		return fmt.Errorf("create oauth grant %s: %w", g.Name, err)
@@ -55,11 +55,11 @@ func (s *Store) CreateOAuthGrant(ctx context.Context, g store.OAuthGrant) error 
 	return nil
 }
 
-const oauthGrantColumns = `name, client_id, resource, connectors, created_at, last_used_at`
+const oauthGrantColumns = `name, client_id, resource, connectors, created_at, last_used_at, approval`
 
 func scanOAuthGrant(userID string, row pgx.Row) (store.OAuthGrant, error) {
 	g := store.OAuthGrant{UserID: userID}
-	err := row.Scan(&g.Name, &g.ClientID, &g.Resource, &g.Connectors, &g.CreatedAt, &g.LastUsedAt)
+	err := row.Scan(&g.Name, &g.ClientID, &g.Resource, &g.Connectors, &g.CreatedAt, &g.LastUsedAt, &g.Approval)
 
 	return g, err
 }

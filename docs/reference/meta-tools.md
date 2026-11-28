@@ -322,7 +322,15 @@ Before calling the upstream, Wayfindr:
    URL or file) are never loaded and fail validation, and `format` is not
    enforced. If a schema doesn't compile, the daemon logs a warning and forwards
    the call without validating.
-3. Calls the upstream, within the connector's
+3. Holds the call if the client's token or grant has an
+   [approval gate](/guide/access/scoped-tokens#approval-gates) that matches it
+   and the owner hasn't approved exactly this call. The agent gets an error
+   (see [the errors below](#call-tool-errors-before-the-upstream-is-called)),
+   and the upstream is not touched. The default token, and tokens made without
+   `--remote`, have no gate. The gate is the token's, not the machine's: a
+   remote token used on your machine (`wayfindr call --token-file`) is held as
+   well.
+4. Calls the upstream, within the connector's
    [`timeout`](./configuration#timeout) (default 120 seconds). If the connector
    has no open connection, it connects first.
 
@@ -456,8 +464,20 @@ The `Link:` line appears only when there is an auth link.
 | The client names its profile twice, or with an invalid name | `This client names its Wayfindr profile more than once, or with a name that isn't valid, so Wayfindr refused the request.`   | `Tell the user to check the profile in the client's Wayfindr settings (--profile or ?profile=).`                             |
 | `arguments` is not an object                                | `call_tool's arguments must be a JSON object.`                                                                               | `Pass the tool's arguments as an object matching its inputSchema.`                                                           |
 | `arguments` fails the `inputSchema`                         | `The arguments do not match fake.echo's inputSchema:` then one `- at <JSON pointer>: <problem>` line per failure, at most 10 | `Fix the arguments and call again. Get the inputSchema with search_tools names=["fake.echo"].`                               |
+| A gated call has no approval yet                            | `slack.post_message needs the owner's approval before it runs (approval a3f2).` The first call makes the approval; a repeat gets the same id. | `Wait for the owner to approve it in Wayfindr, then call it again with the same arguments. Changed arguments need a new approval.` |
+| The owner denied it                                         | `The owner denied slack.post_message with these arguments (approval a3f2).`                                                  | `Don't retry it. Tell the user it was denied; a call with other arguments needs its own approval.`                           |
+| Its approval expired                                        | `The owner's approval of slack.post_message with these arguments (approval a3f2) has expired.`                               | `Call it again with the same arguments to ask again, then wait for the owner to approve it in Wayfindr.`                     |
+| The client has 8 live approvals already                     | `slack.post_message needs the owner's approval before it runs, but this client already has 8 open approvals (waiting, approved, or denied), so Wayfindr refused it.` (no approval id) | `A slot frees when an approved call is retried with the same arguments, or when an entry expires (within 24 hours). Don't change the arguments: each variant needs a slot of its own.` |
+| A gated call's arguments repeat a key or aren't valid UTF-8 | `slack.post_message needs the owner's approval, and its arguments repeat a key in an object or hold text that isn't valid UTF-8, so the owner could approve something other than what runs. Keys that differ only in case or Unicode form count as the same key.` | `Send each key once per object, and only valid UTF-8 text, then call again.`                                                  |
+| A gated call's arguments are over 64 KiB or 32 levels deep  | `slack.post_message needs the owner's approval, and its arguments are larger than 64 KiB or nest deeper than 32 levels, more than the owner can review.` | `Send smaller, flatter arguments, for example by splitting the work over several calls, then call again.`                    |
 
-A schema failure looks like this:
+The first four of the approval rows are Kind `approval`, with the Case
+`pending`, `denied`, `expired`, and `queue_full`; the last two are Kind
+`invalid_arguments`, Case `ambiguous` and `too_large`. Every client at every protocol version
+gets the same `isError` result: the owner is never asked through the client, so
+no `input_required` and no form. See
+[Approval gates](/guide/access/scoped-tokens#approval-gates) for what each state
+means. A schema failure looks like this:
 
 ```
 The arguments do not match fake.echo's inputSchema:
@@ -502,8 +522,15 @@ connector's state, which then shows in `wayfindr status` and in `unavailable`.
 | The client speaks a protocol version before 2026-07-28                     | `linear.create_issue needs your input, but your client's MCP version (2025-11-25) can't ask you.` | ``Update the client, or connect it with `wayfindr stdio`, which can ask clients of every version.``                      |
 | The client doesn't declare elicitation                                     | `linear.create_issue needs your input, but your client does not support elicitation.`             | ``Use a client that supports elicitation, or connect it with `wayfindr stdio`, which can ask clients of every version.`` |
 | The answer's `requestState` is expired, tampered with, or for another call | `The answer arrived too late or does not belong to this call.`                                    | `Call the tool again.`                                                                                                   |
+| The answer's `requestState` was used already, on a call an approval gate holds | `The answer arrived too late or does not belong to this call.`                                | `Call the tool again.`                                                                                                   |
 
 When the client can't be asked, the upstream is told the question was cancelled.
+
+A call that an approval gate holds passes the gate before it reaches the
+upstream, so a call that resumes with a valid `requestState` skips it. That
+state is taken once: sent again, it gets the last row above, so one approval
+runs the tool once however often the agent replays its state. Each further
+question from the upstream comes with a new state.
 
 A `needs_auth` result, in full:
 

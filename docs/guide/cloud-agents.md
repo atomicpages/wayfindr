@@ -38,6 +38,12 @@ and you choose which one. Wayfindr never starts, stops, or configures a tunnel.
   everything else stay on your computer, even if someone finds your tunnel's
   address. While you have ChatGPT's sign-in on, a few more addresses answer, and
   only those. The full rule is in [Security](./security#loopback-only).
+- **You can hold its risky calls.** When you make a remote token or approve an
+  OAuth grant, you can name calls that wait for you. The agent is refused until
+  you approve them in the console or with `wayfindr approvals`, which a cloud
+  agent can't reach. A local agent can't be held this way: it can read your
+  default client token and approve its own calls, so only remote tokens and
+  grants take approval entries. See [Approval gates](./access/scoped-tokens#approval-gates).
 - **You can cut it off.** Revoke the token or the grant and the agent is refused
   from its next request. Stop the tunnel and every cloud agent is cut off at
   once.
@@ -90,7 +96,10 @@ anything to the agent.
 
 6. **Step 4, Create a token.** Keep the suggested name, such as `grok-bot`, or
    change it. The name shows in the call log, so you can tell which agent made a
-   call. Select **Create token**.
+   call. Select **Create token**. This form has no field for approval entries: to
+   hold some of the token's calls for your approval, create it with
+   `wayfindr token create --approval` instead; see
+   [Do it from the command line](#do-it-from-the-command-line).
 
 7. **Copy the token now.** The page shows the token once. Wayfindr keeps only a
    hash of it, so it can't show it again. You will give the token to the agent
@@ -198,8 +207,16 @@ console.
    This is the only time it is shown; store it where the client can read it.
    ```
 
-   You can't change a token's connectors or its `--remote` setting later. Revoke
-   it and make another. See [Scoped Client Tokens](./access/scoped-tokens).
+   To hold some of the agent's calls until you approve them, add `--approval`
+   (repeat it for several entries), such as `--approval @write --approval
+   @destructive`. Then answer the calls that wait with
+   [`wayfindr approvals`](../reference/cli#wayfindr-approvals) or in the
+   console's **Approvals** page. See [Approval gates](./access/scoped-tokens#approval-gates)
+   for the entries and what they don't cover.
+
+   You can't change a token's connectors, its `--remote` setting, or its
+   approval entries later. Revoke it and make another. See
+   [Scoped Client Tokens](./access/scoped-tokens).
 
 3. Test it. First, with no token, from any computer:
 
@@ -522,8 +539,10 @@ You need:
    to, when the request started, and the IP address your tunnel reported for the
    browser, labelled "reported by your tunnel". Keep the suggested name, such as
    `chatgpt`, or change it: it shows in the call log and in `wayfindr token list`.
-   Tick only the connectors ChatGPT needs, then select **Approve**. Your browser
-   goes back to ChatGPT, which is now connected.
+   Tick only the connectors ChatGPT needs. Under **Calls that need your
+   approval**, you can list calls that wait for you, one per line, such as
+   `@destructive` or `github.delete_*`; leave it empty for none. Then select
+   **Approve**. Your browser goes back to ChatGPT, which is now connected.
 
 To connect again, for another ChatGPT account or after you changed the public
 URL, select **Connect a client** on the **Cloud agents** page. It is on the
@@ -627,6 +646,17 @@ run, the same one for every cloud agent.
   `tools = ["@read"]` on a connector to allow only the tools the upstream marks
   read-only. A tools list applies to every client, so it limits you too when you
   use that connector yourself.
+- **Hold risky calls for your approval.** Give a remote token `--approval
+  @write --approval @destructive`, or approve ChatGPT's connection with those
+  entries, and the agent can't run those tools until you have read the
+  arguments and approved them. An approval covers one call with exactly those
+  arguments, and lasts 1 hour. The agent has to make the same call again to use
+  it; if it changes any argument, that is a new call and waits for a new
+  approval. A pending call waits 24 hours for you. A client can have 8 calls in
+  the queue at once, and past that its new calls are refused until some are
+  used or expire; a repeat of a call already in the queue still gets its
+  answer. Restarting Wayfindr drops the queue, denials included, so the agent's
+  next try waits again. Wayfindr gives the agent no way to answer for you.
 - **Check what each token does.** `wayfindr token list` and the console's
   **Your cloud agents** list show when each token was last used. `wayfindr calls`
   shows what each one called. Revoke what you don't use, with `wayfindr token revoke <name>` or

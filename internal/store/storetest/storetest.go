@@ -76,12 +76,14 @@ func Run(t *testing.T, newDatabase NewDatabase) {
 		// Scoped client tokens.
 		{"ClientTokensCreateListAndDelete", testClientTokensCreateListAndDelete},
 		{"CreateClientTokenRefusesADuplicateNameOrDigest", testCreateClientTokenRefusesADuplicateNameOrDigest},
+		{"ClientTokenEmptyApprovalReadsBackNil", testClientTokenEmptyApprovalReadsBackNil},
 		{"CreateClientTokenRefusesNoConnectors", testCreateClientTokenRefusesNoConnectors},
 		{"DeleteClientTokenMissingIsNotFound", testDeleteClientTokenMissingIsNotFound},
 		{"TouchClientTokensNeverMovesBackwardsAndIgnoresUnknownDigests", testTouchClientTokensNeverMovesBackwardsAndIgnoresUnknownDigests},
 		{"TouchClientTokensNeverCreditsANewTokenOfTheSameName", testTouchClientTokensNeverCreditsANewTokenOfTheSameName},
 		// OAuth grants and tokens.
 		{"OAuthGrantsCreateGetListAndDelete", testOAuthGrantsCreateGetListAndDelete},
+		{"OAuthGrantEmptyApprovalReadsBackNil", testOAuthGrantEmptyApprovalReadsBackNil},
 		{"CreateOAuthGrantRefusesIncompleteGrants", testCreateOAuthGrantRefusesIncompleteGrants},
 		{"OAuthGrantsAndClientTokensShareANameSpace", testOAuthGrantsAndClientTokensShareANameSpace},
 		{"OAuthNameSpaceHoldsUnderRacingCreates", testOAuthNameSpaceHoldsUnderRacingCreates},

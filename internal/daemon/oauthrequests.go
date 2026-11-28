@@ -73,8 +73,8 @@ func (o oauthRequests) Get(ctx context.Context, id string) (admin.OAuthRequest, 
 // Approve is Server.Approve, with oauthserver.ErrNoRequest as
 // store.ErrNotFound, oauthserver.ErrInvalidName as admin.ErrInvalidApproval,
 // and oauthserver.ErrContested as admin.ErrContested.
-func (o oauthRequests) Approve(ctx context.Context, id, name string, connectors []string) (string, error) {
-	redirect, err := o.server.Approve(ctx, id, name, connectors)
+func (o oauthRequests) Approve(ctx context.Context, id, name string, connectors, approval []string) (string, error) {
+	redirect, err := o.server.Approve(ctx, id, name, connectors, approval)
 
 	switch {
 	case errors.Is(err, oauthserver.ErrNoRequest):

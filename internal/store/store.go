@@ -396,6 +396,10 @@ type ClientToken struct {
 	Digest [sha256.Size]byte
 	// Connectors are the connectors the token may use; at least one.
 	Connectors []string
+	// Approval is the approval entries (ADR 0024): calls matching them wait
+	// for the owner's approval; nil for none. Set at creation and never
+	// changes. The store keeps them as given; the gateway parses them.
+	Approval []string
 	// Remote is whether the token may reach /mcp through a tunnel (ADR
 	// 0021). It is set at creation and never changes.
 	Remote    bool
@@ -430,7 +434,11 @@ type OAuthGrant struct {
 	Resource string
 	// Connectors are the connectors the grant may use; at least one.
 	Connectors []string
-	CreatedAt  time.Time
+	// Approval is the approval entries (ADR 0024): calls matching them wait
+	// for the owner's approval; nil for none. Set at creation and never
+	// changes. The store keeps them as given; the gateway parses them.
+	Approval  []string
+	CreatedAt time.Time
 	// LastUsedAt is when its access token was last used, as
 	// TouchOAuthGrants recorded it; nil until first use.
 	LastUsedAt *time.Time

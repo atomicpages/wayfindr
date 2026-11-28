@@ -463,7 +463,7 @@ func TestAuthorizeKeepsAPendingAuthorization(t *testing.T) {
 		t.Error("Pending of an unclaimed request: true")
 	}
 
-	if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}); !errors.Is(err, oauthserver.ErrNoRequest) {
+	if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}, nil); !errors.Is(err, oauthserver.ErrNoRequest) {
 		t.Errorf("Approve of an unclaimed request: %v, want ErrNoRequest", err)
 	}
 
@@ -536,7 +536,7 @@ func TestClaim(t *testing.T) {
 				t.Error("Pending of a dropped request: true")
 			}
 
-			if _, err := h.srv.Approve(t.Context(), id, "stranger", []string{"github"}); !errors.Is(err, oauthserver.ErrNoRequest) {
+			if _, err := h.srv.Approve(t.Context(), id, "stranger", []string{"github"}, nil); !errors.Is(err, oauthserver.ErrNoRequest) {
 				t.Errorf("Approve of a dropped request: %v, want ErrNoRequest", err)
 			}
 
@@ -547,7 +547,7 @@ func TestClaim(t *testing.T) {
 
 		// Three arrived on the user's arm, so the claimed one is not
 		// approved either; Deny still answers it.
-		if _, err := h.srv.Approve(t.Context(), user, "chatgpt", []string{"github"}); !errors.Is(err, oauthserver.ErrContested) {
+		if _, err := h.srv.Approve(t.Context(), user, "chatgpt", []string{"github"}, nil); !errors.Is(err, oauthserver.ErrContested) {
 			t.Errorf("Approve of the claimed request: %v, want ErrContested", err)
 		}
 
@@ -587,11 +587,11 @@ func TestClaim(t *testing.T) {
 		}
 
 		// The new claim replaces the earlier one.
-		if _, err := h.srv.Approve(t.Context(), first, "chatgpt", []string{"github"}); !errors.Is(err, oauthserver.ErrNoRequest) {
+		if _, err := h.srv.Approve(t.Context(), first, "chatgpt", []string{"github"}, nil); !errors.Is(err, oauthserver.ErrNoRequest) {
 			t.Errorf("Approve of the replaced claim: %v, want ErrNoRequest", err)
 		}
 
-		if _, err := h.srv.Approve(t.Context(), second, "chatgpt", []string{"github"}); err != nil {
+		if _, err := h.srv.Approve(t.Context(), second, "chatgpt", []string{"github"}, nil); err != nil {
 			t.Errorf("Approve of the new claim: %v", err)
 		}
 	})
@@ -731,13 +731,13 @@ func TestApprove(t *testing.T) {
 	h := newHarness(t)
 	id := h.claimedID(t, h.query())
 
-	if _, err := h.srv.Approve(t.Context(), "not-the-id", "chatgpt", []string{"github"}); !errors.Is(err, oauthserver.ErrNoRequest) {
+	if _, err := h.srv.Approve(t.Context(), "not-the-id", "chatgpt", []string{"github"}, nil); !errors.Is(err, oauthserver.ErrNoRequest) {
 		t.Errorf("Approve of an unknown id: %v, want ErrNoRequest", err)
 	}
 
 	h.clock.Advance(2 * time.Second)
 
-	redirect, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github", "linear"})
+	redirect, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github", "linear"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -776,7 +776,7 @@ func TestApprove(t *testing.T) {
 		t.Error("still pending after Approve")
 	}
 
-	if _, err := h.srv.Approve(t.Context(), id, "chatgpt-2", []string{"github"}); !errors.Is(err, oauthserver.ErrNoRequest) {
+	if _, err := h.srv.Approve(t.Context(), id, "chatgpt-2", []string{"github"}, nil); !errors.Is(err, oauthserver.ErrNoRequest) {
 		t.Errorf("second Approve: %v, want ErrNoRequest", err)
 	}
 
@@ -785,12 +785,32 @@ func TestApprove(t *testing.T) {
 	}
 }
 
+// The approval entries the console approved with are the grant's (ADR
+// 0024), stored as given.
+func TestApproveStoresTheApprovalEntries(t *testing.T) {
+	h := newHarness(t)
+	entries := []string{"@destructive", "github.delete_*", "!github.delete_draft"}
+
+	if _, err := h.srv.Approve(t.Context(), h.claimedID(t, h.query()), "chatgpt", []string{"github"}, entries); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := h.grants.Grant(t.Context(), "chatgpt")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if diff := cmp.Diff(entries, g.Approval); diff != "" {
+		t.Errorf("grant's approval (-want +got):\n%s", diff)
+	}
+}
+
 func TestApproveKeepsTheRedirectQuery(t *testing.T) {
 	h := newHarness(t)
 	q := h.query()
 	q.Set("redirect_uri", "https://chatgpt.example/cb?x=1")
 
-	redirect, err := h.srv.Approve(t.Context(), h.claimedID(t, q), "chatgpt", []string{"github"})
+	redirect, err := h.srv.Approve(t.Context(), h.claimedID(t, q), "chatgpt", []string{"github"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -814,7 +834,7 @@ func TestApproveTakenNameKeepsTheRequest(t *testing.T) {
 
 	id := h.claimedID(t, h.query())
 
-	if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}); !errors.Is(err, store.ErrExists) {
+	if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}, nil); !errors.Is(err, store.ErrExists) {
 		t.Fatalf("Approve: %v, want ErrExists", err)
 	}
 
@@ -822,7 +842,7 @@ func TestApproveTakenNameKeepsTheRequest(t *testing.T) {
 		t.Fatal("the request is no longer pending")
 	}
 
-	if _, err := h.srv.Approve(t.Context(), id, "chatgpt-2", []string{"github"}); err != nil {
+	if _, err := h.srv.Approve(t.Context(), id, "chatgpt-2", []string{"github"}, nil); err != nil {
 		t.Errorf("Approve with another name: %v", err)
 	}
 }
@@ -850,7 +870,7 @@ func TestDeny(t *testing.T) {
 		t.Error("still pending after Deny")
 	}
 
-	if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}); !errors.Is(err, oauthserver.ErrNoRequest) {
+	if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}, nil); !errors.Is(err, oauthserver.ErrNoRequest) {
 		t.Errorf("Approve after Deny: %v, want ErrNoRequest", err)
 	}
 }
@@ -877,7 +897,7 @@ func TestPendingNoLongerCurrent(t *testing.T) {
 				t.Error("Pending says true")
 			}
 
-			if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}); !errors.Is(err, oauthserver.ErrNoRequest) {
+			if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}, nil); !errors.Is(err, oauthserver.ErrNoRequest) {
 				t.Errorf("Approve: %v, want ErrNoRequest", err)
 			}
 
@@ -912,7 +932,7 @@ func TestApproveContested(t *testing.T) {
 				t.Errorf("Arrived = %d, want 2", req.Arrived)
 			}
 
-			if _, err := h.srv.Approve(t.Context(), ids[pick], "chatgpt", []string{"github"}); !errors.Is(err, oauthserver.ErrContested) {
+			if _, err := h.srv.Approve(t.Context(), ids[pick], "chatgpt", []string{"github"}, nil); !errors.Is(err, oauthserver.ErrContested) {
 				t.Fatalf("Approve: %v, want ErrContested", err)
 			}
 
@@ -941,7 +961,7 @@ func TestApproveContested(t *testing.T) {
 				t.Errorf("Arrived on the next arm = %d, want 1", got.Arrived)
 			}
 
-			if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}); err != nil {
+			if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}, nil); err != nil {
 				t.Errorf("Approve on the next arm: %v", err)
 			}
 		})
@@ -956,7 +976,7 @@ func TestApproveContested(t *testing.T) {
 			t.Fatal("Claim: false")
 		}
 
-		if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}); !errors.Is(err, oauthserver.ErrContested) {
+		if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}, nil); !errors.Is(err, oauthserver.ErrContested) {
 			t.Errorf("Approve: %v, want ErrContested", err)
 		}
 	})
@@ -1000,7 +1020,7 @@ func TestDisarm(t *testing.T) {
 			t.Error("Claim after Disarm: true")
 		}
 
-		if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}); !errors.Is(err, oauthserver.ErrNoRequest) {
+		if _, err := h.srv.Approve(t.Context(), id, "chatgpt", []string{"github"}, nil); !errors.Is(err, oauthserver.ErrNoRequest) {
 			t.Errorf("Approve after Disarm: %v, want ErrNoRequest", err)
 		}
 
@@ -1042,7 +1062,7 @@ func TestApproveClientRemoved(t *testing.T) {
 	id := h.claimedID(t, h.query())
 	h.setServer(func(s *config.Server) { s.OAuth.Clients = []string{otherClient} })
 
-	if _, err := h.srv.Approve(t.Context(), id, "removed-client", []string{"github"}); !errors.Is(err, oauthserver.ErrNoRequest) {
+	if _, err := h.srv.Approve(t.Context(), id, "removed-client", []string{"github"}, nil); !errors.Is(err, oauthserver.ErrNoRequest) {
 		t.Errorf("Approve: %v, want ErrNoRequest", err)
 	}
 
@@ -1080,12 +1100,12 @@ func TestAuthorizeHeadLeavesTheArm(t *testing.T) {
 func TestRacingAnswersToOneRequest(t *testing.T) {
 	answers := map[string]func(h *harness, id string) error{
 		"approve": func(h *harness, id string) error {
-			_, err := h.srv.Approve(context.Background(), id, "chatgpt", []string{"github"})
+			_, err := h.srv.Approve(context.Background(), id, "chatgpt", []string{"github"}, nil)
 
 			return err
 		},
 		"approve as another name": func(h *harness, id string) error {
-			_, err := h.srv.Approve(context.Background(), id, "chatgpt-2", []string{"github"})
+			_, err := h.srv.Approve(context.Background(), id, "chatgpt-2", []string{"github"}, nil)
 
 			return err
 		},

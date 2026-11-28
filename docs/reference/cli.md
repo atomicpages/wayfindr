@@ -25,6 +25,9 @@ wayfindr auth login linear    # authorize an OAuth connector
 | [`wayfindr calls`](#wayfindr-calls)                                | Show the tools agents called, newest first.                                          | Yes, 10 s                                              |
 | [`wayfindr search <query>`](#wayfindr-search)                      | Search the catalog as an agent would, and show why.                                  | Yes, 30 s                                              |
 | [`wayfindr call <connector.tool>`](#wayfindr-call)                 | Run one real tool call through the daemon, as an agent would.                        | Yes, 30 s to list the tool, then the connector's       |
+| [`wayfindr approvals`](#wayfindr-approvals)                        | List the calls waiting for your approval. Alias: `approvals list`.                   | Yes, 10 s                                              |
+| [`wayfindr approvals approve <id>`](#approve-and-deny)             | Show a waiting call, ask, and approve it, once.                                      | Yes, 10 s to show it, 10 s to approve it               |
+| [`wayfindr approvals deny <id>`](#approve-and-deny)                | Deny a waiting call.                                                                 | Yes, 10 s                                              |
 | [`wayfindr ui`](#wayfindr-ui)                                      | Open the web console in the browser, signed in.                                      | Yes, 10 s                                              |
 | [`wayfindr scope [connector]`](#wayfindr-scope)                    | Show the project scope that applies here and what it exposes.                        | Yes, 30 s, if a scope file applies or with `--profile` |
 | [`wayfindr connector add <name>`](#wayfindr-connector-add)         | Add a connector to the config file and report it.                                    | Starts one, unless `--no-wait`                         |
@@ -52,7 +55,7 @@ wayfindr auth login linear    # authorize an OAuth connector
 
 `wayfindr --help` lists the commands in four groups: **Daemon** (`init`,
 `start`, `stop`, `logs`, `service`, `update`), **Inspect** (`status`, `calls`, `search`,
-`call`, `scope`, `ui`), **Manage** (`connector`, `auth`, `secret`, `token`,
+`call`, `approvals`, `scope`, `ui`), **Manage** (`connector`, `auth`, `secret`, `token`,
 `config`), and **Plumbing** (`stdio`, `completion`, `version`, `help`).
 
 ## Global flags
@@ -429,6 +432,10 @@ needsecret: The connector's config refers to secret:missing_one, but no such sec
   per connector and warning (see [warnings](#warnings) below). **Notes** lists
   OAuth tokens that can't be refreshed but have more than a day left.
 - With no connectors: `No connectors are configured.`
+- When calls wait for your approval, the output ends with
+  ``2 approvals waiting. Review them with `wayfindr approvals`.`` (`1 approval
+  waiting. Review it …` for one). It counts the entries nobody has answered, and
+  is not in the `--json` output. See [`wayfindr approvals`](#wayfindr-approvals).
 - Orphaned credentials:
   `Orphaned credentials (connectors no longer in the config): old` then
   ``Remove each with `wayfindr auth logout <connector>`.``
@@ -555,7 +562,7 @@ TIME                  CLIENT       TOKEN           TOOL                  DURATIO
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ok`             | The upstream returned a result.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `tool_error`     | The upstream returned a result marked as an error (`isError`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `rejected`       | Wayfindr refused the call without calling the upstream: a malformed name, an unknown tool (including one on a connector the client token doesn't allow, `no_connector`), a tool the config, the [profile](../guide/access/profiles), or the [project scope](../guide/access/project-scopes) hides (`hidden_by_policy`, `hidden_by_profile`, `hidden_by_scope`), a profile the config doesn't define (`unknown_profile`) or named twice or with an invalid name (`invalid_scope`, `bad_profile`), arguments that don't match the tool's schema, or an answer whose `requestState` doesn't belong to the call. |
+| `rejected`       | Wayfindr refused the call without calling the upstream: a malformed name, an unknown tool (including one on a connector the client token doesn't allow, `no_connector`), a tool the config, the [profile](../guide/access/profiles), or the [project scope](../guide/access/project-scopes) hides (`hidden_by_policy`, `hidden_by_profile`, `hidden_by_scope`), a profile the config doesn't define (`unknown_profile`) or named twice or with an invalid name (`invalid_scope`, `bad_profile`), arguments that don't match the tool's schema, a gated call's arguments that repeat a key or aren't valid UTF-8 (`ambiguous`) or are over 64 KiB or 32 levels deep (`too_large`), a remote client's call that needs your [approval](../guide/access/scoped-tokens#approval-gates) and doesn't have it (`pending`, `denied`, `expired`, or `queue_full`), or an answer whose `requestState` doesn't belong to the call or was used already (`invalid_request_state`). |
 | `failed`         | The call failed: Wayfindr couldn't read its catalog, or calling the upstream failed (auth, unreachable, timeout, a question the client can't be asked, sampling). A call cut short because the client gave up or the daemon stopped shows as `failed: canceled`. An upstream that answers with a protocol error shows as `failed: rejected`, which is not the same as the `rejected` result.                                                                                                                                                                                                                 |
 | `input_required` | The upstream asked you a question, and the call returned it to the client. The client's answer is logged as a call of its own.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
@@ -756,6 +763,24 @@ as spaces. Other content prints as one line each: `image, 48 KiB`,
 content. Over 4 KiB of text, the output stops with
 `… cut at 4 KiB of 12 KiB; pass --output <file> for the whole result.`
 
+**When the call needs your approval.** A client token made with
+[`--approval`](#wayfindr-token-create) has some calls held until you approve
+them. Run as that token (`--token-file`), such a call is refused as an agent's
+would be, and the command prints the way out after the refusal:
+
+```
+error · 0.0s · 312 B
+slack.post_message needs the owner's approval before it runs (approval a3f2).
+To fix: Wait for the owner to approve it in Wayfindr, then call it again with the same arguments. Changed arguments need a new approval.
+To approve it: wayfindr approvals approve a3f2
+```
+
+Approve it (`approvals approve` shows the call and asks first), then run the
+same command again: with exactly the same arguments, it runs and spends the
+approval. The command exits `1` for the refusal. A call
+refused because you denied it, or because its approval expired, gets no
+`To approve it` line: the refusal says what to do.
+
 **When the server asks for more.** An upstream can ask for input mid-call. A
 form is asked on stdin, field by field (`n` to `Answer? [Y/n]` declines; an
 empty answer skips an optional field). A URL request prints the URL and waits
@@ -769,6 +794,7 @@ ask, and fails.
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `result`     | The `CallToolResult` in MCP's wire form (`content`, `structuredContent`, `isError`; for a question, `resultType: "input_required"`, `inputRequests`, `requestState`). |
 | `class`      | The tool's class: `read`, `write`, or `destructive`. Absent when the catalog has no such tool.                                                                  |
+| `approval`   | The id of the approval the call waits on, when it was refused because the owner must approve it first. Absent otherwise. See [`wayfindr approvals`](#wayfindr-approvals). |
 | `elapsed_ms` | How long the call took, Wayfindr's checks included.                                                                                                             |
 
 **Exit:** `0` when the tool answered, and with `--json` when it asks a question.
@@ -776,6 +802,119 @@ ask, and fails.
 no `Error:` line), when the arguments are not a JSON object, the token is
 unknown, or the daemon can't be reached
 ([Finding the daemon](#finding-the-daemon)).
+
+## `wayfindr approvals`
+
+List the calls waiting for your approval, and approve or deny them. A
+[remote client token](../guide/cloud-agents) can require your approval for some
+of its calls (`wayfindr token create --approval`, see
+[`token create`](#wayfindr-token-create)); the gateway refuses such a call, with
+the id of its approval, until you answer here or in the console. Nothing a
+client sends can answer: only the admin API can, and a remote client can't reach
+it. [ADR 0024](../adr/0024-approval-gates-on-remote-clients) says why.
+
+```text
+$ wayfindr approvals
+ID    CLIENT    TOOL                CLASS  STATE    AGE  EXPIRES
+a3f2  grok-bot  slack.post_message  write  pending  2m   23h58m
+a3f2  arguments (52 B): {"channel":"C01","text":"Deploy done, cutting v1.2"}
+
+$ wayfindr approvals approve a3f2
+Client:  grok-bot
+Tool:    slack.post_message
+Class:   write
+State:   pending
+Arguments (52 B): {"channel":"C01","text":"Deploy done, cutting v1.2"}
+Approve slack.post_message for grok-bot? [y/N] y
+Approved a3f2: the client's next call with the same tool and arguments runs, once.
+```
+
+`wayfindr approvals` and `wayfindr approvals list` (alias `ls`) are the same
+command. It takes `--json`, which prints the daemon's list as is.
+
+**Prints** one row per approval, oldest first, then a line of its id, the size
+of its arguments, and the arguments, or `No approvals are waiting.` The id
+starts the arguments line too, so arguments that wrap into what looks like a row
+can't pass as one: each row's arguments follow it under the same id.
+
+- **ID** is what `approve` and `deny` take.
+- **CLIENT** is the name of the client token or OAuth grant that made the call.
+- **TOOL** is the qualified name, and **CLASS** the tool's class: `read`,
+  `write`, or `destructive`.
+- **STATE** is `pending` until you answer, then `granted` (approved, and not yet
+  used) or `denied`.
+- **AGE** is the time since the first call, and **EXPIRES** the time left:
+  `<1m`, `59m`, `1h5m`, `23h58m`. A pending approval lasts 24 hours from the
+  first call. A granted one lasts 1 hour from your answer. A denied one lasts
+  until the pending one would have, and at least 1 hour from your denial.
+- **arguments** are the call's arguments in full, on one line, never cut. They
+  are the gateway's copy of the call, not the agent's description of it, so read
+  them before you approve: an approval covers a call with exactly these
+  arguments, and nothing else. They are shown as they decode, which is how the
+  approval reads them: an escape such as `\u0072` shows as the `r` it stands
+  for, numbers stay as sent, and keys are shown in sorted order (the order
+  doesn't change the call). The size is that of the arguments as sent; a
+  size much larger than the line you can see means something is out of view.
+  Control, bidirectional, and format characters (tag characters, the zero-width
+  joiner, the byte order mark, the soft hyphen), line and paragraph separators,
+  variation selectors, characters that draw as nothing (the combining grapheme
+  joiner, blank fillers), spaces other than the plain one, and the blank braille
+  pattern print as `\uXXXX`, or `\U000XXXXX` above U+FFFF, and invalid UTF-8 as
+  `\xXX`. So does each plain space after the second in a row, and each
+  combining mark after the second stacked on one character. The cells follow
+  the same rules. What an agent sent can't act on your terminal, push text out
+  of view, or disguise itself.
+
+The queue is in memory. A daemon restart drops it, and the agent's retry asks
+again. A gated call that was waiting on a question from its server when the
+daemon restarted has to start again too. A client can have at most 8 approvals at once, waiting, approved, or
+denied. A call that would make a ninth is refused (`queue_full`), and nothing is
+dropped to make room; a repeat of a call that already has an entry still gets
+that entry's answer. A place frees when an approval is used or an entry expires.
+
+### Approve and deny
+
+```
+wayfindr approvals approve <id> [--yes]
+wayfindr approvals deny <id>
+```
+
+Each takes exactly one id, from the listing.
+
+`approve` first prints the call the id names: its client, tool, class, and
+state, then the size of its arguments and the arguments in full, on one line, as
+the listing shows them. On a terminal it then asks
+`Approve <tool> for <client>? [y/N]`, which names the call again in case long
+arguments scrolled it out of view. It first discards anything typed or pasted
+before the question, on macOS and Linux, so only an answer you type after it
+counts. Only `y` or `yes` approves, and anything else prints `Nothing changed.` Without
+a terminal it approves only with `--yes`, and otherwise fails with
+`` not a terminal, so nothing was asked or changed: pass --yes to approve it once you have reviewed it with `wayfindr approvals` ``.
+Read the call even when an agent asked you to run the command: the approval
+covers the call shown, whatever the agent said it was. If the id names another
+call by the time you answer (ids start over when Wayfindr restarts), nothing is
+approved and the command fails with
+`approval "<id>" is not the call you were shown; list approvals again`.
+
+| Flag    | Meaning                                                                       |
+| ------- | ----------------------------------------------------------------------------- |
+| `--yes` | Approve without asking. Use it only once you have read the call it prints. |
+
+`deny` asks nothing, since a denial lets nothing run, and prints one line.
+
+| Command   | Prints                                                                          | Effect                                                                                                                                              |
+| --------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `approve` | The call, the question, then `Approved <id>: the client's next call with the same tool and arguments runs, once.` | The next call from that client with the same tool and arguments runs, and the approval is spent before the upstream is called, even if the call then fails. A second identical call asks again. |
+| `deny`    | `Denied <id>: matching calls are refused until it expires.`                     | Matching calls are refused as denied until the approval expires. You can still approve it later. Denying an approved call before it runs revokes it. |
+
+Changed arguments don't match an approval: they make a new one.
+
+**Exit:** `0` once answered, and when you answer no to `approve`'s question.
+`1` when no approval has that id (it expired, was spent, or never existed),
+printed as
+`no approval "<id>" is waiting: it expired, was spent, or never existed`, when
+`approve` has no terminal to ask on and no `--yes`, or when the daemon can't be
+reached ([Finding the daemon](#finding-the-daemon)).
 
 ## `wayfindr ui`
 
@@ -1809,6 +1948,7 @@ argument, the token's name.
 | ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--connector <connector>` | none    | A connector the token can use. Repeat it for several. At least one is required.                                                              |
 | `--remote`                | `false` | Let the token reach `/mcp` through a tunnel, which no other token can. It can't be changed later. See [Cloud agents](../guide/cloud-agents). |
+| `--approval <entry>`      | none    | A call that needs your approval before it runs. Repeat it for several. Only with `--remote`. See **Approval entries** below.                 |
 
 **Prints** `Created client token <name>. It can use: <connectors>.` (`Created remote client token …` with `--remote`), then the
 token on a line of its own, then
@@ -1831,8 +1971,46 @@ again.
   holds it can use them from anywhere until you revoke it.
 - Tokens don't expire.
 
+**Approval entries.** With `--approval`, calls that match an entry are refused
+until you approve them with [`wayfindr approvals`](#wayfindr-approvals). The
+entries are fixed at creation, like the connectors: to change them, revoke the
+token and create another. A call needs approval when any entry matches it and no
+`!` entry does.
+
+| Entry                   | Matches                                                                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `@write`                | Tools whose class is `write`. It does not include `read` tools, as a `tools` list's `@write` does, and it does not include `destructive` ones. |
+| `@destructive`          | Tools whose class is `destructive`, which includes any tool the upstream gave no annotations.                                 |
+| `<connector>.<glob>`    | Tools of that connector whose upstream name matches the glob, with the [`tools` list](./configuration#tools)'s glob syntax. The connector must be one of the token's. |
+| `!<connector>.<glob>`   | Exempts the tools it matches from the other entries. A class can't be exempted, and a list of only `!` entries is refused.    |
+
+In an approval entry, `*` and `?` also match `/`, so `slack.*` holds a tool
+named `admin/delete`. `@read` is refused: reads aren't gated. Gating by name
+covers an upstream that labels a destructive tool `read`.
+
+```text
+$ wayfindr token create grok-bot --connector slack --connector linear --remote \
+    --approval @write --approval @destructive --approval 'linear.run_*'
+Created remote client token grok-bot. It can use: slack, linear.
+Calls that need your approval: write and destructive tools, linear.run_*.
+wf_s_9d2f…
+This is the only time it is shown; store it where the client can read it.
+```
+
+With `@write` and no `@destructive` it adds
+`Warning: @write does not cover destructive or unannotated tools. Add --approval @destructive to gate them too.`
+Exemptions print as `, except <entry>`. The approval line comes before the token.
+
+`--approval` only protects a remote client, which can't reach the admin API that
+answers. A local agent can read the default token and approve its own calls, so
+without `--remote` the command fails before asking the daemon:
+`Approval gates protect only remote clients: a local agent can approve its own calls with the default token.`
+The daemon enforces the same rule, and refuses entries that don't parse or that
+name a connector the token can't use.
+
 **Exit:** `0` once created. `1` when no `--connector` is given
-(`required flag(s) "connector" not set`, before the daemon is asked), or when
+(`required flag(s) "connector" not set`, before the daemon is asked), when
+`--approval` is given without `--remote`, or when
 the daemon refuses: the name isn't valid or is `default`, a token of that name
 exists, or a connector isn't configured. The daemon's reason is the error.
 
@@ -1852,6 +2030,8 @@ The columns are:
   connector removed from the config since is still listed.
 - **REMOTE** is `yes` for a token created with `--remote`, `no` otherwise. Only
   a `yes` token gets through a tunnel. An OAuth grant is always `yes`.
+- **APPROVAL** appears once some token has approval entries: its entries as
+  created, or `-`. See [`token create`](#wayfindr-token-create).
 - **LAST USED** is when a client last presented the token, or the grant's
   access token, or `-` if none has. The daemon writes it to the store at most
   once a minute, and when it stops, so it can lag by up to a minute.
@@ -1868,6 +2048,7 @@ With no scoped tokens or grants it prints
 | `tokens[].connectors`   | The connectors it can use, as created.                                       |
 | `tokens[].client`       | An OAuth grant's client ID. Absent for a token.                              |
 | `tokens[].remote`       | `true` if it was created with `--remote` or is an OAuth grant, else `false`. |
+| `tokens[].approval`     | Its approval entries, as created. Absent when it has none.                   |
 | `tokens[].created_at`   | When it was created.                                                         |
 | `tokens[].last_used_at` | When a client last presented it. Absent until the token is first used.       |
 

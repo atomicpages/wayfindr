@@ -115,6 +115,8 @@ func testOAuthGrantsCreateGetListAndDelete(t *testing.T, newDatabase NewDatabase
 	// LastUsedAt is the store's to set.
 	chat.CreatedAt = chat.CreatedAt.Add(456 * time.Microsecond)
 	chat.LastUsedAt = &chat.CreatedAt
+	// Approval entries are kept as given and in order, opaque to the store.
+	chat.Approval = []string{"linear.delete_*", "github.merge_pull_request"}
 	ci := oauthGrant(user, "ci", "github")
 	createOAuthGrants(t, s, chat, ci)
 
@@ -122,7 +124,8 @@ func testOAuthGrantsCreateGetListAndDelete(t *testing.T, newDatabase NewDatabase
 	wantChat.CreatedAt = oauthBase
 	wantChat.LastUsedAt = nil
 
-	// Ordered by name, connectors as given.
+	// Ordered by name, connectors as given; ci has no approval entries and
+	// reads back nil.
 	if diff := cmp.Diff([]store.OAuthGrant{wantChat, wantCI}, listOAuthGrants(t, s, user), approxTime); diff != "" {
 		t.Fatalf("ListOAuthGrants (-want +got):\n%s", diff)
 	}
@@ -171,6 +174,23 @@ func testOAuthGrantsCreateGetListAndDelete(t *testing.T, newDatabase NewDatabase
 
 	// The name is free again once its grant is deleted.
 	createOAuthGrants(t, s, ci)
+}
+
+func testOAuthGrantEmptyApprovalReadsBackNil(t *testing.T, newDatabase NewDatabase) {
+	s, user := newStore(t, newDatabase)
+	g := oauthGrant(user, "chatgpt", "github")
+	g.Approval = []string{}
+	createOAuthGrants(t, s, g)
+
+	got, err := s.GetOAuthGrant(context.Background(), user, "chatgpt")
+
+	if err != nil {
+		t.Fatalf("GetOAuthGrant: %v", err)
+	}
+
+	if got.Approval != nil {
+		t.Errorf("Approval = %#v, want nil", got.Approval)
+	}
 }
 
 func testCreateOAuthGrantRefusesIncompleteGrants(t *testing.T, newDatabase NewDatabase) {

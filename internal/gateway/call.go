@@ -97,12 +97,12 @@ func (g *Gateway) callTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 		ClientName: clientName(req),
 		Narrow:     func() (config.Narrowing, error) { return g.narrowingOf(req, client, authed) },
 		Asker:      Asker{ProtocolVersion: req.ProtocolVersion(), Capabilities: req.ClientCapabilities()},
-	}), nil
+	}).Result, nil
 }
 
 // callCore is the call path every door shares (design §7.6): it runs the
 // call and records it in the call log, once, whichever way it ended.
-func (g *Gateway) callCore(ctx context.Context, r CallRequest, opts CallOptions) *mcp.CallToolResult {
+func (g *Gateway) callCore(ctx context.Context, r CallRequest, opts CallOptions) CallResponse {
 	started := time.Now()
 	res, o := g.call(ctx, r, opts)
 
@@ -124,7 +124,7 @@ func (g *Gateway) callCore(ctx context.Context, r CallRequest, opts CallOptions)
 		})
 	}
 
-	return res
+	return CallResponse{Result: res, Approval: o.approval}
 }
 
 // outcome is how a call ended, for the call log.
@@ -140,6 +140,9 @@ type outcome struct {
 	// duration is how long upstreams.Call took, connecting included; nil
 	// when the call never got that far.
 	duration *time.Duration
+	// approval is the id of the pending approval the call was refused for
+	// (ADR 0024); empty for every other outcome.
+	approval string
 	// resultBytes is the length of the upstream's result's JSON encoding
 	// (see resultBytes); nil when no result came back, and for an
 	// input_required result, which is not the tool's own.
@@ -150,8 +153,9 @@ type outcome struct {
 // qualified name, check that the client token allows the connector and that
 // it is configured, look the tool up in the catalog, check the connector's
 // tool policy and the request's profile and project scope, validate the
-// arguments against the tool's inputSchema, then call the upstream and
-// return its result unchanged, isError results included.
+// arguments against the tool's inputSchema, hold a gated call for the
+// owner's approval (ADR 0024), then call the upstream and return its result
+// unchanged, isError results included.
 func (g *Gateway) call(ctx context.Context, r CallRequest, opts CallOptions) (*mcp.CallToolResult, outcome) {
 	var (
 		o outcome
@@ -241,6 +245,30 @@ func (g *Gateway) call(ctx context.Context, r CallRequest, opts CallOptions) (*m
 		return g.fail(o, err)
 	}
 
+	// The approval gate (ADR 0024), before the connector is touched, so a
+	// held call holds no upstream session.
+	class := toolClass(t.Definition)
+	gated := g.gated(opts.Client, connector, tool, class)
+
+	if gated {
+		// The owner reads the arguments in full and approves them as the
+		// digest reads them, and the upstream gets them as sent: they must
+		// be small enough to read, and the two readings must not differ.
+		if c := gatedArguments(args); c != "" {
+			return g.fail(o, &Error{Kind: KindInvalidArguments, Case: c, Tool: name, Connector: connector})
+		}
+
+		// A resumed call skips the gate: only a call that passed it reached
+		// the upstream and was given a request state, which openState binds
+		// to this client token instance, tool, and arguments, and which
+		// spendState lets through once, in the process that sealed it.
+		if r.Resume == nil {
+			if err := g.gate(opts.Client, name, connector, tool, class, args); err != nil {
+				return g.fail(o, err)
+			}
+		}
+	}
+
 	var res *mcp.CallToolResult
 
 	upstreamStarted := time.Now()
@@ -251,6 +279,28 @@ func (g *Gateway) call(ctx context.Context, r CallRequest, opts CallOptions) (*m
 
 		if !ok {
 			return g.fail(o, &Error{Kind: KindInvalidRequestState, Tool: name, Connector: connector})
+		}
+
+		// A state the gate covers, now or when it was minted, is taken
+		// once. Only this process knows which states were spent, so one
+		// sealed by another (before a restart, or before states carried a
+		// boot id) is refused, and its question discarded: no one here can
+		// answer it.
+		if gated || st.Gated {
+			gated = true
+
+			if st.Boot != g.boot {
+				return g.fail(o, &Error{Kind: KindInvalidRequestState, Tool: name, Connector: connector})
+			}
+
+			if !g.spendState(p.State, time.Unix(st.Expires, 0)) {
+				// The question belongs to the call that spent the state,
+				// which answered it already or is answering it: it is not
+				// discarded.
+				continued = true
+
+				return g.fail(o, &Error{Kind: KindInvalidRequestState, Tool: name, Connector: connector})
+			}
 		}
 
 		continued = true
@@ -268,7 +318,7 @@ func (g *Gateway) call(ctx context.Context, r CallRequest, opts CallOptions) (*m
 	}
 
 	if res.InputRequests != nil {
-		asked, err := g.ask(opts.Asker, opts.Client.Instance(), connector, tool, args, res)
+		asked, err := g.ask(opts.Asker, opts.Client.Instance(), connector, tool, args, gated, res)
 
 		if err != nil {
 			return g.fail(o, err)
@@ -312,6 +362,11 @@ func resultBytes(res *mcp.CallToolResult) *int64 {
 // fail is the error result of a call that ended with err, and its outcome.
 func (g *Gateway) fail(o outcome, err error) (*mcp.CallToolResult, outcome) {
 	o.result, o.kind, o.errCase = classify(err)
+
+	if e, ok := AsError(err); ok && e.Kind == KindApproval && e.Case == CaseApprovalPending {
+		o.approval = e.Approval
+	}
+
 	res := g.errorResult(err)
 	o.text = errorText(res)
 
@@ -323,7 +378,8 @@ func (g *Gateway) fail(o outcome, err error) (*mcp.CallToolResult, outcome) {
 func classify(err error) (result store.CallResult, kind, errCase string) {
 	if e, ok := AsError(err); ok {
 		switch e.Kind {
-		case KindInvalidName, KindUnknownTool, KindInvalidArguments, KindInvalidSearch, KindInvalidRequestState, KindInvalidScope, KindUnknownProfile:
+		case KindInvalidName, KindUnknownTool, KindInvalidArguments, KindInvalidSearch, KindInvalidRequestState, KindInvalidScope, KindUnknownProfile,
+			KindApproval:
 			return store.CallRejected, string(e.Kind), string(e.Case)
 		case KindInternal, KindCannotAsk, KindCanceled:
 			return store.CallFailed, string(e.Kind), string(e.Case)

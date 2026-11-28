@@ -102,6 +102,14 @@ wayfindr call github.list_repos --token-file ./nightly.token
 A connector the token leaves out is refused as if it weren't configured. The
 call log names the token.
 
+If the token is a remote one made with
+[`--approval`](./access/scoped-tokens#approval-gates) and the call needs your
+approval, it is refused as an agent's would be, and the command prints
+`To approve it: wayfindr approvals approve <id>`. Run that, which shows the
+call and asks before it approves it, then run the same call again, with the
+same arguments: it runs and uses the approval up. Run
+without `--token-file`, the call uses the default token, which no gate holds.
+
 ## When the server asks for more
 
 Some tools ask for input mid-call. Wayfindr asks you on the terminal: a form

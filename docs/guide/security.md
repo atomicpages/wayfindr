@@ -23,6 +23,8 @@ where the edges are.
 | Someone copies your database file                                      | Secrets and tokens in it are encrypted, and the master key is normally stored elsewhere.                                                                                                                                                                                   |
 | An agent or a prompt injection tries to read credentials               | No tool returns them. Agents only get tool definitions, results, and advice.                                                                                                                                                                                               |
 | A prompt injection takes over an unattended agent                      | Give it a scoped client token: it reaches only its connectors, and no admin API.                                                                                                                                                                                           |
+| A cloud agent runs a risky call while nobody watches                   | Give its remote token or OAuth grant [approval entries](./access/scoped-tokens#approval-gates). A matching call is refused until you approve it, with the arguments Wayfindr holds, in the console or with `wayfindr approvals`. A remote client can't reach either, so it can't answer for you. |
+| A local agent approves its own gated call                              | Not defended: the default client token, which the admin API accepts, sits in a file your account can read. This is why `--approval` is refused on a token that isn't remote.                                                                                              |
 | A token leaks to the wrong server                                      | Each OAuth token is bound to its connector's URL and only sent there.                                                                                                                                                                                                      |
 | A stolen OAuth token is replayed elsewhere                             | With DPoP or a certificate-bound token, it is useless without Wayfindr's key or certificate.                                                                                                                                                                               |
 | A hostile server shows you a phishing page for a device code           | Wayfindr shows or opens only an `https` address, or `http` on loopback.                                                                                                                                                                                                    |
@@ -31,8 +33,9 @@ where the edges are.
 
 What it does not defend against: other processes running as your user. Any
 program that can read your home directory can read the default client token and
-talk to the daemon, just as it could read your shell's API keys. Run untrusted
-code under another account or in a container.
+talk to the daemon, just as it could read your shell's API keys. That includes
+approving any call an [approval gate](./access/scoped-tokens#approval-gates)
+holds. Run untrusted code under another account or in a container.
 
 ## Loopback only
 
@@ -99,8 +102,9 @@ Authorization: Bearer wf_…
 ```
 
 The **default client token**, which `wayfindr init` writes, is 32 random bytes
-and can use every connector and the admin API. The daemon compares tokens in
-constant time. Where it lives and how to override it are in
+and can use every connector and the admin API, which includes approving any
+call that an [approval gate](./access/scoped-tokens#approval-gates) holds. The
+daemon compares tokens in constant time. Where it lives and how to override it are in
 [Paths and environment](/reference/paths-and-environment#client-token). To
 replace it, see
 [Rotating the client token](./running#rotating-the-client-token).
@@ -142,7 +146,12 @@ Give every agent that runs unattended a
 connectors you name and keeps it off the admin API, so a prompt injection can't
 reach your other connectors. A cloud agent gets a
 [remote token](./access/scoped-tokens#remote-tokens), which is a scoped token
-that may also come in through a tunnel. A [tools list](./access/tools-lists) hides a
+that may also come in through a tunnel. You can also have a remote token or an
+OAuth grant hold some calls until you approve them
+([approval gates](./access/scoped-tokens#approval-gates)): you read the real
+arguments, and an approval covers one call with exactly those. It protects only
+remote clients, because a local agent can use the default token to approve its
+own calls. The gate shows you the call; you decide whether it is safe. A [tools list](./access/tools-lists) hides a
 connector's tools from every client, but trusts the upstream's read-only and
 destructive hints, so name the tools you allow for anything that matters.
 Profiles and project scopes are chosen by the client, so they keep a cooperative

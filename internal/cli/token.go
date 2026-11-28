@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -60,6 +62,7 @@ func newTokenCreateCmd(host Host) *cobra.Command {
 	var (
 		connectors []string
 		remote     bool
+		approval   []string
 	)
 
 	cmd := &cobra.Command{
@@ -72,11 +75,28 @@ another.
 
 With --remote the token may also reach /mcp through a tunnel, which no other
 token can. Make one for a cloud agent, and give it only the connectors that
-agent needs. A remote token is fixed at creation, like its connectors.`,
+agent needs. A remote token is fixed at creation, like its connectors.
+
+With --approval (repeatable, and only with --remote) some of the token's calls
+wait for your approval, which you give with ` + "`wayfindr approvals approve`" + `. An
+entry is a class, @write or @destructive, each covering only itself (@write
+does not include destructive tools, and a tool with no annotations counts as
+destructive); <connector>.<glob>, the tools of that connector whose name
+matches; or !<connector>.<glob>, which exempts the tools it matches from the
+other entries. The glob is over the upstream's tool name.`,
+		Example: `  wayfindr token create nightly --connector github
+  wayfindr token create grok-bot --connector slack --connector linear --remote \
+    --approval @write --approval @destructive --approval 'linear.run_*'`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// The admin API refuses it too; checked here, the flag fails
+			// before the daemon is asked.
+			if len(approval) > 0 && !remote {
+				return errors.New(admin.LocalApprovalMessage) //nolint:staticcheck // ST1005: a full sentence, the words the admin API refuses with
+			}
+
 			res, err := tokenRequest(cmd.Context(), host, func(ctx context.Context, d *adminDaemon) (admin.TokenCreated, error) {
-				return d.CreateToken(ctx, admin.TokenSpec{Name: args[0], Connectors: connectors, Remote: remote})
+				return d.CreateToken(ctx, admin.TokenSpec{Name: args[0], Connectors: connectors, Remote: remote, Approval: approval})
 			})
 
 			if err != nil {
@@ -89,14 +109,27 @@ agent needs. A remote token is fixed at creation, like its connectors.`,
 				kind = " remote"
 			}
 
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Created%s client token %s. It can use: %s.\n%s\nThis is the only time it is shown; store it where the client can read it.\n",
-				kind, res.Name, strings.Join(res.Connectors, ", "), res.Token)
+			out := cmd.OutOrStdout()
+
+			if _, err := fmt.Fprintf(out, "Created%s client token %s. It can use: %s.\n", kind, res.Name, strings.Join(res.Connectors, ", ")); err != nil {
+				return err
+			}
+
+			if len(res.Approval) > 0 {
+				if _, err := io.WriteString(out, approvalSummary(res.Approval)); err != nil {
+					return err
+				}
+			}
+
+			_, err = fmt.Fprintf(out, "%s\nThis is the only time it is shown; store it where the client can read it.\n", res.Token)
 
 			return err
 		},
 	}
 	cmd.Flags().StringArrayVar(&connectors, "connector", nil, "a connector the token can use (repeatable; at least one)")
 	cmd.Flags().BoolVar(&remote, "remote", false, "let the token reach /mcp through a tunnel (cannot be changed later)")
+	cmd.Flags().StringArrayVar(&approval, "approval", nil,
+		"a call that needs your approval: @write, @destructive, <connector>.<glob>, or !<connector>.<glob> (repeatable; needs --remote)")
 	// Registering a flag that exists cannot fail.
 	_ = cmd.MarkFlagRequired("connector")
 
@@ -186,7 +219,15 @@ func writeTokensTable(w io.Writer, res admin.TokenList) error {
 		b.WriteString("No scoped client tokens. Create one with `wayfindr token create <name> --connector <connector>`.\n")
 	} else {
 		tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-		rows := []string{"NAME\tKIND\tCONNECTORS\tREMOTE\tCREATED\tLAST USED"}
+		// The approval column appears once some token has entries.
+		gated := slices.ContainsFunc(res.Tokens, func(t admin.Token) bool { return len(t.Approval) > 0 })
+		header := "NAME\tKIND\tCONNECTORS\tREMOTE"
+
+		if gated {
+			header += "\tAPPROVAL"
+		}
+
+		rows := []string{header + "\tCREATED\tLAST USED"}
 
 		for _, t := range res.Tokens {
 			used := "-"
@@ -201,7 +242,13 @@ func writeTokensTable(w io.Writer, res admin.TokenList) error {
 				remote = "yes"
 			}
 
-			rows = append(rows, strings.Join([]string{t.Name, tokenKind(t), strings.Join(t.Connectors, ", "), remote, formatTime(t.CreatedAt), used}, "\t"))
+			cells := []string{t.Name, tokenKind(t), strings.Join(t.Connectors, ", "), remote}
+
+			if gated {
+				cells = append(cells, orDash(strings.Join(t.Approval, " ")))
+			}
+
+			rows = append(rows, strings.Join(append(cells, formatTime(t.CreatedAt), used), "\t"))
 		}
 
 		// A tabwriter over a bytes.Buffer cannot fail.
@@ -213,3 +260,61 @@ func writeTokensTable(w io.Writer, res admin.TokenList) error {
 
 	return err
 }
+
+// approvalSummary is the lines `token create` prints for a token's approval
+// entries: what needs the owner's approval, and, when @write stands without
+// @destructive, a warning that the riskiest calls are left out. Each line
+// ends in a newline. An entry given twice is named once.
+func approvalSummary(entries []string) string {
+	var classes, names, exempt []string
+
+	seen := make(map[string]bool, len(entries))
+
+	for _, e := range entries {
+		if seen[e] {
+			continue
+		}
+
+		seen[e] = true
+
+		switch rest, negated := strings.CutPrefix(e, "!"); {
+		case negated:
+			exempt = append(exempt, rest)
+		case e == approvalWrite:
+			classes = append(classes, "write")
+		case e == approvalDestructive:
+			classes = append(classes, "destructive")
+		default:
+			names = append(names, e)
+		}
+	}
+
+	var what []string
+
+	if len(classes) > 0 {
+		what = append(what, strings.Join(classes, " and ")+" tools")
+	}
+
+	what = append(what, names...)
+	s := "Calls that need your approval: " + strings.Join(what, ", ")
+
+	if len(exempt) > 0 {
+		s += ", except " + strings.Join(exempt, ", ")
+	}
+
+	s += ".\n"
+
+	if slices.Contains(entries, approvalWrite) && !slices.Contains(entries, approvalDestructive) {
+		s += "Warning: " + approvalWrite + " does not cover destructive or unannotated tools. " +
+			"Add --approval " + approvalDestructive + " to gate them too.\n"
+	}
+
+	return s
+}
+
+// The class entries of --approval (config.ParseApproval, whose own
+// constants are unexported).
+const (
+	approvalWrite       = "@write"
+	approvalDestructive = "@destructive"
+)

@@ -33,6 +33,11 @@ type Client struct {
 	// Connectors are the connectors a scoped token may use; nil for the
 	// default token, which may use every connector.
 	Connectors []string
+	// Approval is the approval entries (ADR 0024) of a scoped token or
+	// OAuth grant, as stored: calls matching them wait for the owner's
+	// approval. nil for the default token and for a token with none; the
+	// gateway parses them.
+	Approval []string
 	// Remote is whether a scoped token may reach /mcp through a tunnel (ADR
 	// 0021). It is set when the token is created and never changes. The
 	// default token is never remote, and neither is a token that is not

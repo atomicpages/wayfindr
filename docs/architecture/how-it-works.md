@@ -98,6 +98,19 @@ never shows up in search and is refused by name. See
 [0010](/adr/0010-project-scopes), [0011](/adr/0011-named-profiles), and
 [0012](/adr/0012-scoped-client-tokens) for why.
 
+One more check applies to `call_tool` only, and only to remote clients: a remote
+client token or an OAuth grant can be created with **approval entries**. A call
+that an entry matches is refused until you approve it, in the console or with
+`wayfindr approvals`, which a remote client can't reach. The gate runs after the
+layers above and before the upstream is touched. Wayfindr holds the call's
+arguments in memory, shows them to you as it received them, and an approval
+covers one call with exactly those arguments. The default token and tokens made
+without `--remote` have no gate, because a local client could approve its own
+calls with the default token. The gate keys on the token, not the machine: a
+remote token used locally is held too. See
+[Approval gates](/guide/access/scoped-tokens#approval-gates) and
+[ADR 0024](/adr/0024-approval-gates-on-remote-clients).
+
 ## Credentials
 
 The daemon presents each connector's **credential**: OAuth tokens, static

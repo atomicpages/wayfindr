@@ -29,9 +29,11 @@ the code changes: a later decision amends or replaces it.
 | [0021](./0021-remote-client-tokens)                            | Let cloud agents reach `/mcp` through a tunnel with remote client tokens.            |
 | [0022](./0022-authorization-server-for-remote-clients)         | Let cloud agents sign in to `/mcp` through an authorization server in the daemon.    |
 | [0023](./0023-self-update)                                     | Update the binary from GitHub Releases with `wayfindr update`.                       |
+| [0024](./0024-approval-gates-on-remote-clients)                | Hold a remote client's risky calls until the owner approves them in the console.     |
 
 0001 to 0007 were accepted on 2026-11-03, 0013 on 2026-11-04, 0014 and 0015 on
 2026-11-08, 0008 and 0009 on 2026-11-09, 0010 on 2026-11-10, 0011 and 0012 on
 2026-11-11, 0016 and 0017 on 2026-11-12, 0018 and 0019 on 2026-11-17, 0020 on
-2026-11-18, 0021 on 2026-11-21, and 0022 and 0023 on 2026-11-22. 0013 to 0015
-were written down on 2026-11-12, after their decisions shipped.
+2026-11-18, 0021 on 2026-11-21, 0022 and 0023 on 2026-11-22, and 0024 on
+2026-11-27. 0013 to 0015 were written down on 2026-11-12, after their decisions
+shipped.

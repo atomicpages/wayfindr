@@ -30,7 +30,7 @@ type fakeTokens struct {
 	grants []store.OAuthGrant
 }
 
-func (f *fakeTokens) Create(_ context.Context, name string, connectors []string, remote bool) (store.ClientToken, string, error) {
+func (f *fakeTokens) Create(_ context.Context, name string, connectors []string, remote bool, approval []string) (store.ClientToken, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -38,7 +38,7 @@ func (f *fakeTokens) Create(_ context.Context, name string, connectors []string,
 		return store.ClientToken{}, "", fmt.Errorf("create client token %s: %w", name, store.ErrExists)
 	}
 
-	t := store.ClientToken{Name: name, Connectors: connectors, Remote: remote, CreatedAt: time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)}
+	t := store.ClientToken{Name: name, Connectors: connectors, Remote: remote, Approval: approval, CreatedAt: time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)}
 	f.tokens = append(f.tokens, t)
 
 	return t, scopedValue, nil
@@ -354,5 +354,162 @@ func TestTokenCreateRefusals(t *testing.T) {
 				t.Errorf("tokens = %+v, want none created", f.tokens)
 			}
 		})
+	}
+}
+
+const createdFooter = scopedValue + "\n" + "This is the only time it is shown; store it where the client can read it.\n"
+
+// TestTokenCreateApprovalSaysWhatNeedsApproval: the entries reach the
+// daemon as given, and the output says in words which calls wait for the
+// owner, between the created line and the value.
+func TestTokenCreateApprovalSaysWhatNeedsApproval(t *testing.T) {
+	tests := []struct {
+		name    string
+		entries []string
+		want    string
+	}{
+		{
+			"classes and a name",
+			[]string{"@write", "@destructive", "linear.run_*"},
+			"Calls that need your approval: write and destructive tools, linear.run_*.\n",
+		},
+		{
+			"one class",
+			[]string{"@destructive"},
+			"Calls that need your approval: destructive tools.\n",
+		},
+		{
+			"names alone",
+			[]string{"linear.run_*", "slack.post_message"},
+			"Calls that need your approval: linear.run_*, slack.post_message.\n",
+		},
+		{
+			"an exemption",
+			[]string{"@write", "@destructive", "!slack.post_draft"},
+			"Calls that need your approval: write and destructive tools, except slack.post_draft.\n",
+		},
+		{
+			"an entry given twice is named once",
+			[]string{"@write", "@destructive", "@write", "linear.run_*", "linear.run_*", "!slack.post_draft", "!slack.post_draft"},
+			"Calls that need your approval: write and destructive tools, linear.run_*, except slack.post_draft.\n",
+		},
+		{
+			"write without destructive warns",
+			[]string{"@write"},
+			"Calls that need your approval: write tools.\n" +
+				"Warning: @write does not cover destructive or unannotated tools. Add --approval @destructive to gate them too.\n",
+		},
+		{
+			"write with a name but no destructive still warns",
+			[]string{"@write", "linear.run_*"},
+			"Calls that need your approval: write tools, linear.run_*.\n" +
+				"Warning: @write does not cover destructive or unannotated tools. Add --approval @destructive to gate them too.\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeTokens{}
+			host := tokenHost(t, f)
+			args := []string{"create", "grok-bot", "--connector", "slack", "--connector", "linear", "--remote"}
+
+			for _, e := range tt.entries {
+				args = append(args, "--approval", e)
+			}
+
+			code, stdout, stderr := runToken(t, host, args...)
+
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0; stderr: %s", code, stderr)
+			}
+
+			want := "Created remote client token grok-bot. It can use: slack, linear.\n" + tt.want + createdFooter
+
+			if diff := cmp.Diff(want, stdout); diff != "" {
+				t.Errorf("stdout (-want +got):\n%s", diff)
+			}
+
+			if len(f.tokens) != 1 || !slices.Equal(f.tokens[0].Approval, tt.entries) {
+				t.Errorf("stored tokens %+v, want one with approval %v", f.tokens, tt.entries)
+			}
+		})
+	}
+}
+
+// TestTokenCreateApprovalNeedsRemote: the CLI refuses --approval on a token
+// that isn't remote, with the admin API's own words, before it asks the
+// daemon: no token is created, and no daemon is needed to hear it.
+func TestTokenCreateApprovalNeedsRemote(t *testing.T) {
+	f := &fakeTokens{}
+	host := tokenHost(t, f)
+	const want = "Approval gates protect only remote clients: a local agent can approve its own calls with the default token."
+
+	code, stdout, stderr := runToken(t, host, "create", "grok-bot", "--connector", "slack", "--approval", "@write")
+
+	if code == 0 || !strings.Contains(stderr, want) {
+		t.Errorf("exit %d, stderr %q; want a failure saying %q", code, stderr, want)
+	}
+
+	if stdout != "" || len(f.tokens) != 0 {
+		t.Errorf("stdout %q, tokens %+v; want nothing created", stdout, f.tokens)
+	}
+
+	// No daemon runs here, so only a check before the request gets this far.
+	host, root := testHost(t)
+	writeHostFiles(t, root, "127.0.0.1:1")
+
+	if code, _, stderr = runToken(t, host, "create", "grok-bot", "--connector", "slack", "--approval", "@write"); code == 0 || !strings.Contains(stderr, want) {
+		t.Errorf("with no daemon: exit %d, stderr %q; want the same refusal, not a daemon error", code, stderr)
+	}
+}
+
+// TestTokenCreateRefusedApprovalEntriesAreTheDaemons: a bad entry, or one
+// for a connector the token can't use, is refused by the admin API, and its
+// message is shown as it is.
+func TestTokenCreateRefusedApprovalEntriesAreTheDaemons(t *testing.T) {
+	f := &fakeTokens{}
+	host := tokenHost(t, f)
+
+	code, _, stderr := runToken(t, host, "create", "grok-bot", "--connector", "slack", "--remote", "--approval", "@read")
+
+	if code == 0 || !strings.Contains(stderr, "reads cannot be gated") || len(f.tokens) != 0 {
+		t.Errorf("exit %d, stderr %q, tokens %+v; want the daemon's refusal and no token", code, stderr, f.tokens)
+	}
+}
+
+// TestTokenListShowsApprovalEntries: the APPROVAL column appears once a
+// token has entries, and not before, so existing output is unchanged.
+func TestTokenListShowsApprovalEntries(t *testing.T) {
+	f := &fakeTokens{}
+	host := tokenHost(t, f)
+
+	if code, _, stderr := runToken(t, host, "create", "nightly", "--connector", "github"); code != 0 {
+		t.Fatalf("create: exit %d: %s", code, stderr)
+	}
+
+	_, stdout, _ := runToken(t, host, "list")
+
+	if strings.Contains(stdout, "APPROVAL") {
+		t.Errorf("list without gated tokens:\n%s\nwant no APPROVAL column", stdout)
+	}
+
+	if code, _, stderr := runToken(t, host, "create", "grok-bot", "--connector", "slack", "--remote", "--approval", "@write", "--approval", "!slack.draft_*"); code != 0 {
+		t.Fatalf("create: exit %d: %s", code, stderr)
+	}
+
+	_, stdout, _ = runToken(t, host, "list")
+	lines := strings.Split(stdout, "\n")
+
+	if diff := cmp.Diff([]string{"NAME", "KIND", "CONNECTORS", "REMOTE", "APPROVAL", "CREATED", "LAST", "USED"}, strings.Fields(lines[0])); diff != "" {
+		t.Errorf("header (-want +got):\n%s", diff)
+	}
+
+	// The fake lists in creation order: nightly, then grok-bot.
+	if got := strings.Fields(lines[2])[:6]; !slices.Equal(got, []string{"grok-bot", "token", "slack", "yes", "@write", "!slack.draft_*"}) {
+		t.Errorf("grok-bot's row starts %q, want its entries", got)
+	}
+
+	if got := strings.Fields(lines[1])[:5]; !slices.Equal(got, []string{"nightly", "token", "github", "no", "-"}) {
+		t.Errorf("nightly's row starts %q, want a dash for no entries", got)
 	}
 }

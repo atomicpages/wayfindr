@@ -1,0 +1,25 @@
+<main class="content" id="main">
+
+<div class="page-head">
+  <div>
+    <h1>Approvals</h1>
+    <p>Calls from remote clients that wait for you before they run. An approval covers one call with exactly the arguments shown. This page refreshes every 10 seconds, except while your pointer or focus is on the list and for 5 seconds after you tap, click, scroll, or type.</p>
+  </div>
+</div>
+
+<div id="approvals" class="stack" data-poll-pause hx-get="/ui/approvals" hx-trigger="every 10s" hx-select="#approvals" hx-select-oob="#nav-approvals" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Call</th><th class="hide-sm">Client</th><th>State</th><th class="hide-sm">Asked</th><th class="hide-sm">Expires</th><th class="r"><span class="sr">Actions</span></th></tr></thead>
+        <tbody>
+        
+          <tr><td colspan="6" class="empty">Nothing is waiting for you. A call from a remote client that needs an approval shows up here.</td></tr>
+        
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+    </main>

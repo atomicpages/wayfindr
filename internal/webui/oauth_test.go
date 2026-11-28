@@ -371,7 +371,7 @@ func TestApproveRedirectsToTheClientWithTheCode(t *testing.T) {
 func TestApproveRefusesWhatIsNotTheSignedInConsole(t *testing.T) {
 	c := oauthConsole(t, &bytes.Buffer{})
 	ck := c.signIn(t)
-	form := url.Values{"req": {"r1"}, "name": {"chatgpt"}, "connector": {"github"}}
+	form := url.Values{"req": {"r1"}, "name": {"chatgpt"}, "connector": {"github"}, "approval": {"@write"}}
 
 	t.Run("a post without the CSRF token", func(t *testing.T) {
 		rec := c.post("/ui/oauth/approve", ck, form)
@@ -420,6 +420,86 @@ func TestApproveRefusesWhatIsNotTheSignedInConsole(t *testing.T) {
 	}
 }
 
+func TestApprovePageMatchesTheGoldenFile(t *testing.T) {
+	c := oauthConsole(t, &bytes.Buffer{})
+	ck := c.signIn(t)
+	body := c.getAs(approveURL, ck, navigation()).Body.String()
+	golden(t, "approve.html", content(t, body, csrfOf(t, body)))
+}
+
+// approvalField is the approval entries textarea as the page renders it,
+// holding text.
+func approvalField(text string) string {
+	return `aria-describedby="grant-approval-hint">` + text + `</textarea>`
+}
+
+func TestApproveSendsTheApprovalEntries(t *testing.T) {
+	c := oauthConsole(t, &bytes.Buffer{})
+	ck := c.signIn(t)
+	page := c.getAs(approveURL, ck, navigation()).Body.String()
+	csrf := csrfOf(t, page)
+
+	wantAll(t, "approve page", page, `<label class="field" for="grant-approval"><span>Calls that need your approval</span>`,
+		`name="approval"`, approvalField(""), "<code>@write</code>", "<code>@destructive</code>", "<code>github.delete_*</code>",
+		"<code>!github.delete_draft</code>", "<code>@write</code> does not cover destructive tools or tools without annotations")
+
+	for _, tt := range []struct {
+		name  string
+		field []string
+		want  []string
+	}{
+		{"one entry per line, each trimmed, blank lines and \\r dropped", []string{"@write\r\n  github.delete_* \r\n\r\n!github.delete_draft\r\n"}, []string{"@write", "github.delete_*", "!github.delete_draft"}},
+		{"a field of blank lines is none", []string{" \r\n\t\r\n"}, nil},
+		{"no field is none", nil, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			before := len(c.admin.approved())
+			form := url.Values{"csrf": {csrf}, "req": {"r1"}, "name": {"chatgpt"}, "connector": {"github"}}
+
+			if tt.field != nil {
+				form["approval"] = tt.field
+			}
+
+			if rec := c.post("/ui/oauth/approve", ck, form); rec.Code != http.StatusSeeOther {
+				t.Fatalf("approve = %d, want 303", rec.Code)
+			}
+
+			got := c.admin.approved()[before:]
+			want := []admin.OAuthApproval{{Name: "chatgpt", Connectors: []string{"github"}, Approval: tt.want}}
+
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("approvals (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// The approve page was the site of a consent-phishing finding: nothing the
+// client controls may choose the approval entries, or a client could ask for
+// its own risky calls to go ungated. Its name, host, and suggested grant
+// name, and the page's query, never reach the field.
+func TestApprovalEntriesComeOnlyFromTheOwnersForm(t *testing.T) {
+	c := oauthConsole(t, &bytes.Buffer{})
+	c.admin.oauth.request.ClientName = "@write"
+	c.admin.oauth.request.ClientHost = "github.delete_draft"
+	c.admin.oauth.request.Name = "write"
+	ck := c.signIn(t)
+
+	for _, target := range []string{approveURL, approveURL + "&approval=%40destructive", approveURL + "&approval=!github.*"} {
+		body := c.getAs(target, ck, navigation()).Body.String()
+
+		wantAll(t, target, body, approvalField(""))
+	}
+
+	t.Run("a refused approve refills only what the owner typed", func(t *testing.T) {
+		c.admin.oauth.approveErr = &admin.APIError{Status: http.StatusBadRequest, Message: "no"}
+		csrf := csrfOf(t, c.getAs(approveURL, ck, navigation()).Body.String())
+		rec := c.post("/ui/oauth/approve?approval=%40destructive", ck, url.Values{"csrf": {csrf}, "req": {"r1"}, "name": {"mine"}, "connector": {"github"}})
+
+		wantAll(t, "re-render", rec.Body.String(), approvalField(""))
+	})
+}
+
 func TestApproveRerendersWhenTheNameOrConnectorsAreRefused(t *testing.T) {
 	c := oauthConsole(t, &bytes.Buffer{})
 	ck := c.signIn(t)
@@ -433,18 +513,27 @@ func TestApproveRerendersWhenTheNameOrConnectorsAreRefused(t *testing.T) {
 	}{
 		{"a taken name is 409", &admin.APIError{Status: http.StatusConflict, Message: `a client token or OAuth grant called "mine" already exists`}, http.StatusConflict, `a client token or OAuth grant called &#34;mine&#34; already exists`},
 		{"a bad name is 400", &admin.APIError{Status: http.StatusBadRequest, Message: "client token name must match [a-z0-9]"}, http.StatusBadRequest, "client token name must match"},
+		{
+			"a bad approval entry is 400", &admin.APIError{Status: http.StatusBadRequest, Message: `invalid approval rule: approval[1]: "@read": reads cannot be gated`},
+			http.StatusBadRequest, `invalid approval rule: approval[1]: &#34;@read&#34;: reads cannot be gated`,
+		},
+		{
+			"an approval entry for another connector is 400", &admin.APIError{Status: http.StatusBadRequest, Message: `an approval entry names connector "github", which this connection can't use`},
+			http.StatusBadRequest, `an approval entry names connector &#34;github&#34;, which this connection can&#39;t use`,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c.admin.oauth.approveErr = tt.err
 			before := len(c.admin.askedFor())
-			rec := c.post("/ui/oauth/approve", ck, url.Values{"csrf": {csrf}, "req": {"r1"}, "name": {"mine"}, "connector": {"jira"}})
+			rec := c.post("/ui/oauth/approve", ck, url.Values{"csrf": {csrf}, "req": {"r1"}, "name": {"mine"}, "connector": {"jira"}, "approval": {"@write\r\n@read\r\n"}})
 			body := rec.Body.String()
 
 			if rec.Code != tt.status || rec.Header().Get("Location") != "" {
 				t.Fatalf("approve = %d to %q, want %d and no redirect", rec.Code, rec.Header().Get("Location"), tt.status)
 			}
 
-			wantAll(t, "re-render", body, tt.text, "Approve only if you clicked Connect in ChatGPT", `name="name" type="text" value="mine"`, `value="jira" checked>`)
+			wantAll(t, "re-render", body, tt.text, "Approve only if you clicked Connect in ChatGPT", `name="name" type="text" value="mine"`, `value="jira" checked>`,
+				approvalField("@write\n@read"))
 
 			if got := len(c.admin.askedFor()) - before; got != 1 {
 				t.Errorf("the page asked for the request %d times, want 1 (the request stays claimed)", got)
@@ -485,7 +574,7 @@ func TestApprovePageForAContestedRequest(t *testing.T) {
 		t.Helper()
 		wantAll(t, "contested", body, contested, `name="req" value="r1"`, `formaction="/ui/oauth/deny"`, ">Deny</button>")
 
-		for _, gone := range []string{">Approve</button>", `name="name"`, `name="connector"`, "Approve only if", "That didn't work"} {
+		for _, gone := range []string{">Approve</button>", `name="name"`, `name="connector"`, `name="approval"`, "Approve only if", "That didn't work"} {
 			if strings.Contains(body, gone) {
 				t.Errorf("the contested page shows %q", gone)
 			}

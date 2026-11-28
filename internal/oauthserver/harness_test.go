@@ -494,7 +494,7 @@ func (h *harness) code(t *testing.T, name string) string {
 
 	id := h.claimedID(t, h.query())
 
-	redirect, err := h.srv.Approve(t.Context(), id, name, []string{"github"})
+	redirect, err := h.srv.Approve(t.Context(), id, name, []string{"github"}, nil)
 	if err != nil {
 		t.Fatalf("Approve: %v", err)
 	}

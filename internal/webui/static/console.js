@@ -107,6 +107,52 @@
     true,
   );
 
+  // A polled region marked data-poll-pause (the approvals table) skips its
+  // refresh while the pointer is over it or focus is in it, and for 5
+  // seconds after any touch, click, scroll, or key anywhere on the page, so
+  // the swap can't move or replace what the owner is reading or about to
+  // press. A poll already in flight when one of those happens has its
+  // answer dropped. An hx-trigger filter would say this in the markup, but
+  // filters need eval, which the console's htmx config turns off. Only the
+  // region's own poll is held: a form inside it is the request's element,
+  // not the region.
+  let lastUse = 0;
+
+  for (const type of ["touchstart", "pointerdown", "scroll", "keydown"]) {
+    // scroll doesn't bubble from an element, so listen in the capture
+    // phase; passive, since nothing here cancels the event.
+    document.addEventListener(
+      type,
+      () => {
+        lastUse = Date.now();
+      },
+      { capture: true, passive: true },
+    );
+  }
+
+  function pollPaused(el) {
+    return (
+      el &&
+      el.matches &&
+      el.matches("[data-poll-pause]") &&
+      (el.matches(":hover, :focus-within") || Date.now() - lastUse < 5000)
+    );
+  }
+
+  document.addEventListener("htmx:beforeRequest", (e) => {
+    if (pollPaused(e.detail && e.detail.elt)) {
+      e.preventDefault();
+    }
+  });
+
+  // beforeSwap fires on the swap's target, which for the region's poll is
+  // the region itself (hx-target="this").
+  document.addEventListener("htmx:beforeSwap", (e) => {
+    if (pollPaused(e.detail && e.detail.elt)) {
+      e.detail.shouldSwap = false;
+    }
+  });
+
   // Copy buttons: shown (by CSS) only when the page can write to the
   // clipboard. The text they copy is selectable without any of this.
   if (navigator.clipboard && navigator.clipboard.writeText) {

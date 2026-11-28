@@ -446,3 +446,7 @@ has the details for each kind of client.
   names a profile.
 - To hold a client, such as an unattended job, to some connectors whatever it
   does, give it a [scoped client token](./access/scoped-tokens).
+- To hold some of a cloud agent's calls until you approve them, make its remote
+  token with `--approval`, or approve its OAuth connection with approval
+  entries ([approval gates](./access/scoped-tokens#approval-gates)). A local
+  client can't be gated: it could approve its own calls.

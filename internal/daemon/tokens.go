@@ -102,12 +102,12 @@ func loadClientTokens(ctx context.Context, st store.Store, userID string, now fu
 // apart from a later token of the same name; nothing of its digest or its
 // use.
 func registryClient(t store.ClientToken) clienttoken.Client {
-	return clienttoken.Client{Name: t.Name, Connectors: t.Connectors, Remote: t.Remote, Created: t.CreatedAt}
+	return clienttoken.Client{Name: t.Name, Connectors: t.Connectors, Approval: t.Approval, Remote: t.Remote, Created: t.CreatedAt}
 }
 
 // Create implements admin.ClientTokens: it generates the value, stores its
 // digest, and only then adds it to the registry.
-func (t *clientTokens) Create(ctx context.Context, name string, connectors []string, remote bool) (store.ClientToken, string, error) {
+func (t *clientTokens) Create(ctx context.Context, name string, connectors []string, remote bool, approval []string) (store.ClientToken, string, error) {
 	value, err := clienttoken.Generate()
 
 	if err != nil {
@@ -120,6 +120,9 @@ func (t *clientTokens) Create(ctx context.Context, name string, connectors []str
 		Digest:     clienttoken.Digest(value),
 		Connectors: slices.Clone(connectors),
 		Remote:     remote,
+		// Nil for none: admin never passes an empty list, so the registry
+		// holds what the store reads back after a restart.
+		Approval: slices.Clone(approval),
 		// The store keeps milliseconds: truncating here makes the create's
 		// answer the time a list reads back.
 		CreatedAt: t.clock.Now().UTC().Truncate(time.Millisecond),
@@ -311,7 +314,7 @@ func (t *clientTokens) accept(g store.OAuthGrant, access store.OAuthToken) {
 // /admin. It carries the grant's creation time, not the access token's,
 // which rotates, so every access token of one grant is one instance.
 func grantClient(g store.OAuthGrant) clienttoken.Client {
-	return clienttoken.Client{Name: g.Name, Connectors: slices.Clone(g.Connectors), Remote: true, Created: g.CreatedAt}
+	return clienttoken.Client{Name: g.Name, Connectors: g.Connectors, Approval: g.Approval, Remote: true, Created: g.CreatedAt}
 }
 
 // suspended reports whether g is suspended: OAuth is off, its resource is not

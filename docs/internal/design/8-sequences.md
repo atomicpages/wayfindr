@@ -13,6 +13,17 @@ Client ─call_tool(linear.create_issue)─► gateway ─GetTool/validate─►
   (401 → forced refresh + one replay; 403 insufficient_scope → needs_auth step-up)
 ```
 
+**`call_tool` from a remote client with an approval gate** (ADR 0024)
+
+```
+Client ─call_tool(slack.post_message, args)─► gateway ─…validate…─► gated? (rule matches, not exempt)
+  gate: key = (client instance, tool, digest(args)); no entry → new pending entry
+  ◄─ isError "needs the owner's approval … (approval a3f2)"   (upstream not touched)
+Owner: wayfindr approvals / console ─POST /admin/approvals/a3f2/approve─► entry granted (1 hour)
+Client ─call_tool(same tool, same args)─► gate: granted → entry removed (spent) ─► Manager.Call ─► upstream ─► result
+  (changed args → another key → another pending entry; a repeat while pending → the same id)
+```
+
 **First-time OAuth**
 
 ```

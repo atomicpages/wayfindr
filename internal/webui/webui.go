@@ -1,10 +1,11 @@
 // Package webui serves the daemon's local web console under /ui/ (design
 // §7.10, ADR 0016): connectors, the call log, a search preview, client
-// tokens, and a wizard that connects cloud agents (ADR 0021), as
-// server-rendered pages, and a form that adds connectors
-// (ADR 0017). It reads and acts only through the admin API's Client, so the
-// browser and the CLI see the same answers; the daemon writes the config
-// for an add, and the console never edits or removes a connector.
+// tokens, the approvals that gated calls wait on (ADR 0024), and a wizard
+// that connects cloud agents (ADR 0021), as server-rendered pages, and a
+// form that adds connectors (ADR 0017). It reads and acts only through the
+// admin API's Client, so the browser and the CLI see the same answers; the
+// daemon writes the config for an add, and the console never edits or
+// removes a connector.
 //
 // httpd mounts New's handler at /ui/ behind its loopback Host and Origin
 // guards (a POST only from the same origin); webui checks its own session
@@ -63,6 +64,11 @@ type Admin interface {
 	OAuthRequest(ctx context.Context, id string) (admin.OAuthRequest, error)
 	ApproveOAuth(ctx context.Context, id string, a admin.OAuthApproval) (admin.OAuthDecision, error)
 	DenyOAuth(ctx context.Context, id string) (admin.OAuthDecision, error)
+	// The approval queue of gated calls (ADR 0024): its live entries, and
+	// the owner's answers.
+	Approvals(ctx context.Context) (admin.ApprovalList, error)
+	ApproveApproval(ctx context.Context, id string, created time.Time) error
+	DenyApproval(ctx context.Context, id string, created time.Time) error
 }
 
 // Options is what New needs. The daemon builds it once.
@@ -142,6 +148,9 @@ func New(opts Options) (http.Handler, error) {
 	mux.HandleFunc("GET /ui/tokens", c.authed(c.tokens))
 	mux.HandleFunc("POST /ui/tokens", c.authedForm(c.createToken))
 	mux.HandleFunc("POST /ui/tokens/{name}/revoke", c.authedForm(c.revokeToken))
+	mux.HandleFunc("GET /ui/approvals", c.authed(c.approvals))
+	mux.HandleFunc("POST /ui/approvals/{id}/approve", c.authedForm(c.answerApproval("approved", c.Admin.ApproveApproval)))
+	mux.HandleFunc("POST /ui/approvals/{id}/deny", c.authedForm(c.answerApproval("denied", c.Admin.DenyApproval)))
 	mux.HandleFunc("GET /ui/cloud-agents", c.authed(c.cloudAgents))
 	mux.HandleFunc("POST /ui/cloud-agents/url", c.authedForm(c.savePublicURL))
 	mux.HandleFunc("POST /ui/cloud-agents/token", c.authedForm(c.createCloudToken))
@@ -180,7 +189,7 @@ func parsePages(brands brandIndex) (map[string]*template.Template, error) {
 
 	pages := map[string]*template.Template{}
 
-	for _, name := range []string{"connectors", "connector", "tool", "calls", "search", "tokens", "cloudagents", "error", "add", "review", "device", "approve"} {
+	for _, name := range []string{"connectors", "connector", "tool", "calls", "search", "tokens", "cloudagents", "error", "add", "review", "device", "approve", "approvals"} {
 		t, err := template.Must(layout.Clone()).ParseFS(templateFiles, "templates/"+name+".html")
 
 		if err != nil {

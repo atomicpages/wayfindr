@@ -1,0 +1,57 @@
+{{define "content"}}{{with .Body}}
+<div class="page-head">
+  <div>
+    <h1>Approvals</h1>
+    <p>Calls from remote clients that wait for you before they run. An approval covers one call with exactly the arguments shown. This page refreshes every 10 seconds, except while your pointer or focus is on the list and for 5 seconds after you tap, click, scroll, or type.</p>
+  </div>
+</div>
+{{/* hx-disinherit keeps the poll's select, target and swap off the buttons
+     inside. hx-select-oob also refreshes the sidebar's count.
+     data-poll-pause: console.js skips the poll, and drops the answer of one
+     in flight, while the pointer is over the table or focus is in it and
+     for 5 seconds after any touch, click, scroll, or key, so a refresh
+     can't move a row the owner is reading or about to answer. Each row
+     shows its arguments in full, never behind a click or in a scroll box:
+     the owner approves exactly these. */}}
+<div id="approvals" class="stack" data-poll-pause hx-get="/ui/approvals" hx-trigger="every 10s" hx-select="#approvals" hx-select-oob="#nav-approvals" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Call</th><th class="hide-sm">Client</th><th>State</th><th class="hide-sm">Asked</th><th class="hide-sm">Expires</th><th class="r"><span class="sr">Actions</span></th></tr></thead>
+        <tbody>
+        {{range .Rows}}
+          <tr>
+            <td>
+              <div><span class="tool">{{.Tool}}</span> {{if .Class}}<span class="badge cls-{{.Class}}">{{.Class}}</span>{{end}}</div>
+              <div class="muted small mono">{{.ID}}</div>
+              <div class="muted small args-size">Arguments, {{.Size}}</div>
+              <pre class="why-text args">{{.Arguments}}</pre>
+            </td>
+            <td class="hide-sm"><span class="badge secondary">{{.Client}}</span></td>
+            <td>{{template "badge" .Badge}}</td>
+            <td class="hide-sm nowrap">{{.Age}}</td>
+            <td class="hide-sm nowrap">{{.Expires}}</td>
+            <td class="r">
+              <div class="actions">
+                {{if .CanApprove}}<form method="post" action="/ui/approvals/{{.ID}}/approve">
+                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                  <input type="hidden" name="created" value="{{.Created}}">
+                  <button class="btn btn-primary btn-sm" type="submit" aria-label="Approve {{.Tool}} for {{.Client}}">Approve</button>
+                </form>{{end}}
+                {{if .CanDeny}}<form method="post" action="/ui/approvals/{{.ID}}/deny">
+                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                  <input type="hidden" name="created" value="{{.Created}}">
+                  <button class="btn btn-destructive btn-sm" type="submit" aria-label="{{if .Revoke}}Revoke{{else}}Deny{{end}} {{.Tool}} for {{.Client}}">{{if .Revoke}}Revoke{{else}}Deny{{end}}</button>
+                </form>{{end}}
+              </div>
+            </td>
+          </tr>
+        {{else}}
+          <tr><td colspan="6" class="empty">Nothing is waiting for you. A call from a remote client that needs an approval shows up here.</td></tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}{{end}}

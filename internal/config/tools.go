@@ -129,11 +129,19 @@ func (v *validator) tools(at string, p ToolPolicy) {
 		case strings.TrimSpace(glob) == "":
 			v.add(where, "must name a tool, a glob, or a class (%q, %q)", entryRead, entryWrite)
 		default:
-			// path.Match checks the whole pattern only when the name doesn't
-			// cut it short; an empty name never does.
-			if _, err := pathpkg.Match(glob, ""); err != nil {
+			if err := checkGlob(glob); err != nil {
 				v.add(where, "%q is not a valid glob: %v", e, err)
 			}
 		}
 	}
+}
+
+// checkGlob reports why glob is not a well-formed glob, of a tools list or
+// an approval entry, or nil.
+func checkGlob(glob string) error {
+	// path.Match checks the whole pattern only when the name doesn't cut it
+	// short; an empty name never does.
+	_, err := pathpkg.Match(glob, "")
+
+	return err
 }

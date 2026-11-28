@@ -292,10 +292,11 @@ func (s *Server) Pending(id string) (Request, bool) {
 	return p.req, true
 }
 
-// Approve creates the grant name for connectors (Grants.CreateGrant, with
-// the request's client ID and resource, CreatedAt now), makes a code bound
-// to it (CodeTTL, single use), and returns redirect_uri with code, state,
-// and iss. Only the claimed request is answered: ErrNoRequest when Pending
+// Approve creates the grant name for connectors, with the approval entries
+// approval (nil for none; the caller has checked them, ADR 0024), through
+// Grants.CreateGrant, with the request's client ID and resource, CreatedAt
+// now. It makes a code bound to it (CodeTTL, single use), and returns
+// redirect_uri with code, state, and iss. Only the claimed request is answered: ErrNoRequest when Pending
 // would say false, which it does for a request that is pending but not
 // claimed. A CreateGrant error (a taken name: store.ErrExists) is returned
 // as is, and the request stays claimed so the user can pick another name.
@@ -309,7 +310,7 @@ func (s *Server) Pending(id string) (Request, bool) {
 // (Request.Arrived): only the user's own was expected, so the one claimed
 // may be a stranger's, opened in a tab the user didn't open. The request
 // stays claimed, so Deny still answers it.
-func (s *Server) Approve(ctx context.Context, id, name string, connectors []string) (redirect string, err error) {
+func (s *Server) Approve(ctx context.Context, id, name string, connectors, approval []string) (redirect string, err error) {
 	cfg, on := s.running()
 	now := s.now()
 
@@ -344,6 +345,7 @@ func (s *Server) Approve(ctx context.Context, id, name string, connectors []stri
 		ClientID:   p.req.ClientID,
 		Resource:   p.resource,
 		Connectors: slices.Clone(connectors),
+		Approval:   slices.Clone(approval),
 		CreatedAt:  created,
 	})
 	if err != nil {

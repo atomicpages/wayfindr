@@ -30,8 +30,10 @@ type ClientTokens interface {
 	// digest, and starts accepting it. It returns the stored row and the
 	// token's value, which nothing keeps. remote makes the token one that
 	// may reach /mcp through a tunnel (ADR 0021); it cannot be changed
-	// later. A name already taken is an error wrapping store.ErrExists.
-	Create(ctx context.Context, name string, connectors []string, remote bool) (store.ClientToken, string, error)
+	// later. approval is the token's approval entries (ADR 0024), stored as
+	// given; nil gates nothing, and admin passes nil, never an empty list. A name already taken is an error wrapping
+	// store.ErrExists.
+	Create(ctx context.Context, name string, connectors []string, remote bool, approval []string) (store.ClientToken, string, error)
 	// List returns every scoped token, ordered by name.
 	List(ctx context.Context) ([]store.ClientToken, error)
 	// ListGrants returns every OAuth grant, ordered by name.
@@ -53,6 +55,12 @@ type TokenSpec struct {
 	// 0021). It is fixed at creation; to change it, revoke the token and
 	// create another. Absent means false.
 	Remote bool `json:"remote,omitempty"`
+	// Approval are the token's approval entries (ADR 0024,
+	// config.ParseApproval): the calls that wait for the owner's approval.
+	// Only a remote token takes them, and a <connector>.<glob> entry must
+	// name one of Connectors. Fixed at creation, like Remote. Absent gates
+	// nothing.
+	Approval []string `json:"approval,omitempty"`
 }
 
 // TokenCreated is the response to POST /admin/tokens. It is the only
@@ -63,6 +71,8 @@ type TokenCreated struct {
 	Connectors []string `json:"connectors"`
 	// Remote is whether the token may reach /mcp through a tunnel.
 	Remote bool `json:"remote"`
+	// Approval are the request's approval entries; absent when it had none.
+	Approval []string `json:"approval,omitempty"`
 	// Token is the value a client presents as its bearer. It cannot be
 	// read back: only its SHA-256 is stored.
 	Token     string    `json:"token"`
@@ -97,7 +107,10 @@ type Token struct {
 	Client string `json:"client,omitempty"`
 	// Remote is whether the token may reach /mcp through a tunnel; always
 	// true for an OAuth grant.
-	Remote    bool      `json:"remote"`
+	Remote bool `json:"remote"`
+	// Approval are the approval entries (ADR 0024); absent when there are
+	// none.
+	Approval  []string  `json:"approval,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	// LastUsedAt is when a client last presented the token (for a grant, its
 	// access token), as the daemon
@@ -143,13 +156,19 @@ func (a api) createToken(w http.ResponseWriter, r *http.Request) {
 
 	connectors, msg := a.checkTokenSpec(spec, "client token")
 
+	var approval []string
+
+	if msg == "" {
+		approval, msg = checkApproval(spec.Approval, spec.Remote, connectors, "client token")
+	}
+
 	if msg != "" {
 		http.Error(w, msg, http.StatusBadRequest)
 
 		return
 	}
 
-	row, value, err := a.Tokens.Create(r.Context(), spec.Name, connectors, spec.Remote)
+	row, value, err := a.Tokens.Create(r.Context(), spec.Name, connectors, spec.Remote, approval)
 
 	if errors.Is(err, store.ErrExists) {
 		http.Error(w, fmt.Sprintf("a client token or OAuth grant called %q already exists", spec.Name), http.StatusConflict)
@@ -164,8 +183,51 @@ func (a api) createToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.Logger.Info().Str("client_token", row.Name).Strs("connectors", row.Connectors).Bool("remote", row.Remote).Msg("client token created")
-	writeJSON(w, TokenCreated{Name: row.Name, Connectors: row.Connectors, Remote: row.Remote, Token: value, CreatedAt: row.CreatedAt.UTC()})
+	a.Logger.Info().Str("client_token", row.Name).Strs("connectors", row.Connectors).Bool("remote", row.Remote).
+		Strs("approval_entries", row.Approval).Msg("client token created")
+	writeJSON(w, TokenCreated{
+		Name: row.Name, Connectors: row.Connectors, Remote: row.Remote, Approval: row.Approval,
+		Token: value, CreatedAt: row.CreatedAt.UTC(),
+	})
+}
+
+// LocalApprovalMessage is the 400 body of approval entries on a token that
+// isn't remote (ADR 0024's threat model). The CLI checks the same rule
+// before the request and says the same words.
+const LocalApprovalMessage = "Approval gates protect only remote clients: " +
+	"a local agent can approve its own calls with the default token."
+
+// checkApproval checks a client's approval entries (ADR 0024) against its
+// remote flag and its connectors, already checked: entries that parse, on a
+// remote client, naming only its connectors, since an entry for another
+// would gate nothing. It returns the entries to store, nil for none, so
+// an empty list is stored as no list; or msg saying what is wrong. noun
+// names the client in msg, as for checkTokenSpec: "client token", or
+// "connection" for an OAuth grant, which is always remote.
+func checkApproval(entries []string, remote bool, connectors []string, noun string) (approval []string, msg string) {
+	if len(entries) == 0 {
+		return nil, ""
+	}
+
+	if !remote {
+		return nil, LocalApprovalMessage
+	}
+
+	rule, err := config.ParseApproval(entries)
+
+	if err != nil {
+		return nil, err.Error()
+	}
+
+	for _, c := range rule.Connectors() {
+		if !slices.Contains(connectors, c) {
+			// %.64q bounds the echoed name.
+			return nil, fmt.Sprintf("an approval entry names connector %.64q, which this %s can't use; its connectors: %s",
+				c, noun, strings.Join(connectors, ", "))
+		}
+	}
+
+	return entries, ""
 }
 
 // checkTokenSpec checks spec against the naming rule and the running
@@ -235,7 +297,7 @@ func (a api) listTokens(w http.ResponseWriter, r *http.Request) {
 
 	for _, t := range rows {
 		tokens = append(tokens, Token{
-			Name: t.Name, Kind: TokenKindToken, Connectors: t.Connectors, Remote: t.Remote,
+			Name: t.Name, Kind: TokenKindToken, Connectors: t.Connectors, Remote: t.Remote, Approval: t.Approval,
 			CreatedAt: t.CreatedAt.UTC(), LastUsedAt: utcPtr(t.LastUsedAt),
 		})
 	}
@@ -244,7 +306,7 @@ func (a api) listTokens(w http.ResponseWriter, r *http.Request) {
 
 	for _, g := range grants {
 		oauth = append(oauth, Token{
-			Name: g.Name, Kind: TokenKindOAuth, Connectors: g.Connectors, Client: g.ClientID, Remote: true,
+			Name: g.Name, Kind: TokenKindOAuth, Connectors: g.Connectors, Client: g.ClientID, Remote: true, Approval: g.Approval,
 			CreatedAt: g.CreatedAt.UTC(), LastUsedAt: utcPtr(g.LastUsedAt),
 		})
 	}

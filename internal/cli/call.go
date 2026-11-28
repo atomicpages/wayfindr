@@ -57,7 +57,11 @@ printed to open; with --json the question is printed instead, for the caller
 to answer.
 
 The output is the result's text, cut at 4 KiB; --output writes the whole
-result as JSON, and --json prints the daemon's full response.`,
+result as JSON, and --json prints the daemon's full response.
+
+With a --token-file token that needs your approval for the call, the call is
+refused as an agent's would be, and the command prints how to approve it:
+` + "`wayfindr approvals approve <id>`" + `, then run the same call again.`,
 		Example: `  wayfindr connector tools linear create_issue
   wayfindr call linear.create_issue --args-file args.json
   wayfindr call linear.search_issues --args '{"query":"login bug"}'
@@ -318,8 +322,19 @@ func finishCall(cmd *cobra.Command, f callFlags, resp admin.CallResponse, res ad
 		if err := writeJSON(cmd.OutOrStdout(), resp); err != nil {
 			return err
 		}
-	} else if err := writeCallResult(cmd.OutOrStdout(), resp, res, f.output); err != nil {
-		return err
+	} else {
+		if err := writeCallResult(cmd.OutOrStdout(), resp, res, f.output); err != nil {
+			return err
+		}
+
+		// The gateway sets Approval only for a call refused as pending, so
+		// the command is never offered for a denied or expired one, and no
+		// refusal text is read for it.
+		if resp.Approval != "" {
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "To approve it: wayfindr approvals approve %s\n", redact.Printable(resp.Approval)); err != nil {
+				return err
+			}
+		}
 	}
 
 	if res.IsError {

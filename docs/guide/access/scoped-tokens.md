@@ -83,6 +83,9 @@ out of the daemon's environment, so the daemon reads its default token from
 - **No admin API.** Every `/admin/…` request gets `403`
   `This client token cannot use the admin API.` So the agent can't set secrets,
   revoke credentials, read the call log, or make itself another token.
+- **Its risky calls wait for you,** if it is a [remote token](#remote-tokens)
+  made with approval entries. A call an entry matches is refused until you
+  approve it. See [Approval gates](#approval-gates).
 
 A scoped token decides which connectors a client may use, not what a connector's
 credential can do. It doesn't narrow the OAuth scopes Wayfindr was granted.
@@ -95,7 +98,8 @@ connectors.
 
 `wayfindr token list` shows each token's connectors, whether it is
 [remote](#remote-tokens), and when it was last used; `--json` prints the daemon's
-response as JSON.
+response as JSON. Once some token has [approval entries](#approval-gates), an
+**APPROVAL** column shows them (`-` for a token with none).
 `wayfindr token revoke <name>` deletes one, and every client using it is refused
 from its next request on, with no restart.
 
@@ -137,6 +141,107 @@ for you and walks you through the rest. The
 
 `wayfindr token list` shows `yes` in the **REMOTE** column for these, and the
 console marks them with a `remote` badge.
+
+### Approval gates
+
+A cloud agent works while nobody watches. A remote token can hold some of its
+calls until you approve them. Give it entries when you create it:
+
+```text
+$ wayfindr token create grok-bot --connector slack --connector linear --remote \
+    --approval @write --approval @destructive --approval '!slack.add_reaction'
+Created remote client token grok-bot. It can use: slack, linear.
+Calls that need your approval: write and destructive tools, except slack.add_reaction.
+wf_s_9d2f…
+This is the only time it is shown; store it where the client can read it.
+```
+
+A call that an entry matches, and no `!` entry exempts, is refused until you
+approve it. Calls that match nothing run as before. A token made without
+`--approval` has no gate, and neither has the default token or a token made
+without `--remote`, which can't take `--approval`. A remote token is held
+wherever it is used, `wayfindr call --token-file` on your machine included.
+
+| Entry                 | Holds                                                                                                                                                             |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@write`              | Tools the upstream marks as not destructive (and not read-only). It holds only those: not `read` tools, not `destructive` ones, and not tools with no annotations. |
+| `@destructive`        | Every tool that is neither read-only nor marked not destructive, which includes each tool the upstream gave no annotations. MCP's defaults make those destructive.  |
+| `<connector>.<glob>`  | Tools of that connector whose name matches the glob, such as `linear.run_*`. `*` and `?` also match `/`.                                                          |
+| `!<connector>.<glob>` | Lets the tools it matches through, whatever the other entries say. A class can't be exempted, and a list of only exemptions is refused.                            |
+
+Each class holds only itself, unlike a [tools list](./tools-lists), where
+`@write` also lets `@read` tools through. `@write` alone leaves the riskiest
+calls, the destructive and unannotated ones, unheld, and `token create` warns
+you when you give `@write` without `@destructive`. `@read` can't be held. An
+entry can name only a connector the token can use. The entries are fixed when
+you create the token: to change them, revoke it and create another.
+
+Classes come from what the upstream says about its tools. An upstream that marks
+a destructive tool read-only slips past `@destructive`; name the tool instead.
+
+**What the agent sees.** The call is refused, as a `rejected` result, and the
+text names the approval:
+
+```text
+slack.post_message needs the owner's approval before it runs (approval a3f2).
+To fix: Wait for the owner to approve it in Wayfindr, then call it again with the same arguments. Changed arguments need a new approval.
+```
+
+**What you do.** Read the call and its arguments in the console's
+[Approvals page](../console#approving-calls) or with
+[`wayfindr approvals`](/reference/cli#wayfindr-approvals), then approve or deny
+it by its id. The arguments shown are the ones Wayfindr holds, not the agent's
+description of them. Nothing a client sends can answer: only the admin API
+can, and a remote client can't reach it.
+
+**What an approval covers.** One attempt at exactly that tool with exactly
+those arguments, from that token.
+
+- It runs on the agent's next identical call, and is used up before the
+  upstream is called, even if the call then fails. A second identical call waits again. A call with changed
+  arguments is a new call with its own approval.
+- A waiting call lasts 24 hours. An approved one lasts 1 hour from your answer.
+  A denied one is refused until it expires, 24 hours after the first call and at
+  least 1 hour after the denial. You can still approve a denied call, and you
+  can deny an approved one before it is used.
+- A token has at most 8 calls in the queue, waiting, approved, or denied. A new
+  call that would make a ninth is refused (`queue_full`) and nothing is dropped
+  to make room; a repeat of a call already in the queue still gets its entry's
+  answer. Entries free
+  their place when they are used or expire; expiry is checked when something
+  looks at the entry, so an expired entry may read as no entry at all, and the
+  call waits again.
+- The queue lives in memory. Restarting Wayfindr drops every entry, denials
+  included, and the agent's next try waits again. A gated call that was
+  answering a question from its server when Wayfindr restarted starts again
+  too.
+- A gated call whose arguments repeat a key in an object (keys that differ only
+  in case or Unicode form, such as `ﬁle` and `file`, count as the same key), or
+  hold text that isn't valid UTF-8, is
+  refused (`invalid_arguments`, `ambiguous`), because you could approve one
+  reading while the upstream ran another.
+- A gated call whose arguments are larger than 64 KiB, or nest deeper than 32
+  levels, is refused (`invalid_arguments`, `too_large`): you read the arguments
+  in full before you approve them.
+- `wayfindr approvals approve <id>` shows the call and asks before it approves
+  it. An agent may ask you to run it; read the call it shows, not the agent's
+  description.
+
+`wayfindr calls` shows each refusal as `rejected` with `pending`, `denied`,
+`expired`, `queue_full`, `ambiguous`, or `too_large`, and never the arguments.
+
+::: warning
+An approval gate protects only a remote token or an OAuth grant. A local agent
+can read the default client token, which the admin API accepts, and approve its
+own calls. So `--approval` without `--remote` is refused. It also doesn't stop
+you from approving a bad call: you decide on the arguments you see.
+:::
+
+The same entries are on the console's page that approves an OAuth connection,
+such as ChatGPT's ([Cloud agents](../cloud-agents#the-approve-page)). The
+console's own form for a remote token has no approval field: create the token
+with `wayfindr token create --approval` instead. For why it works this way, see
+[ADR 0024](../../adr/0024-approval-gates-on-remote-clients).
 
 `wayfindr calls` records which token each call used: `default` or the scoped
 token's name. Use it to see what an unattended agent did.

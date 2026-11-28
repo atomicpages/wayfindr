@@ -1,0 +1,130 @@
+<main class="content" id="main">
+
+<div class="page-head">
+  <div>
+    <h1>Approvals</h1>
+    <p>Calls from remote clients that wait for you before they run. An approval covers one call with exactly the arguments shown. This page refreshes every 10 seconds, except while your pointer or focus is on the list and for 5 seconds after you tap, click, scroll, or type.</p>
+  </div>
+</div>
+
+<div id="approvals" class="stack" data-poll-pause hx-get="/ui/approvals" hx-trigger="every 10s" hx-select="#approvals" hx-select-oob="#nav-approvals" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Call</th><th class="hide-sm">Client</th><th>State</th><th class="hide-sm">Asked</th><th class="hide-sm">Expires</th><th class="r"><span class="sr">Actions</span></th></tr></thead>
+        <tbody>
+        
+          <tr>
+            <td>
+              <div><span class="tool">github.merge</span> <span class="badge cls-write">write</span></div>
+              <div class="muted small mono">ap-older</div>
+              <div class="muted small args-size">Arguments, 8 B</div>
+              <pre class="why-text args">{
+  &#34;pr&#34;: 7
+}</pre>
+            </td>
+            <td class="hide-sm"><span class="badge secondary">chatgpt</span></td>
+            <td><span class="badge warn"><span class="dot"></span>Waiting</span></td>
+            <td class="hide-sm nowrap">2 h ago</td>
+            <td class="hide-sm nowrap">In 22 h</td>
+            <td class="r">
+              <div class="actions">
+                <form method="post" action="/ui/approvals/ap-older/approve">
+                  <input type="hidden" name="csrf" value="CSRF">
+                  <input type="hidden" name="created" value="2026-11-12T08:00:00Z">
+                  <button class="btn btn-primary btn-sm" type="submit" aria-label="Approve github.merge for chatgpt">Approve</button>
+                </form>
+                <form method="post" action="/ui/approvals/ap-older/deny">
+                  <input type="hidden" name="csrf" value="CSRF">
+                  <input type="hidden" name="created" value="2026-11-12T08:00:00Z">
+                  <button class="btn btn-destructive btn-sm" type="submit" aria-label="Deny github.merge for chatgpt">Deny</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        
+          <tr>
+            <td>
+              <div><span class="tool">github.delete_repo</span> <span class="badge cls-destructive">destructive</span></div>
+              <div class="muted small mono">ap-waiting</div>
+              <div class="muted small args-size">Arguments, 34 B</div>
+              <pre class="why-text args">{
+  &#34;force&#34;: true,
+  &#34;repo&#34;: &#34;acme/&lt;app&gt;&#34;
+}</pre>
+            </td>
+            <td class="hide-sm"><span class="badge secondary">grok</span></td>
+            <td><span class="badge warn"><span class="dot"></span>Waiting</span></td>
+            <td class="hide-sm nowrap">4 min ago</td>
+            <td class="hide-sm nowrap">In 23 h</td>
+            <td class="r">
+              <div class="actions">
+                <form method="post" action="/ui/approvals/ap-waiting/approve">
+                  <input type="hidden" name="csrf" value="CSRF">
+                  <input type="hidden" name="created" value="2026-11-12T09:55:00.000000123Z">
+                  <button class="btn btn-primary btn-sm" type="submit" aria-label="Approve github.delete_repo for grok">Approve</button>
+                </form>
+                <form method="post" action="/ui/approvals/ap-waiting/deny">
+                  <input type="hidden" name="csrf" value="CSRF">
+                  <input type="hidden" name="created" value="2026-11-12T09:55:00.000000123Z">
+                  <button class="btn btn-destructive btn-sm" type="submit" aria-label="Deny github.delete_repo for grok">Deny</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        
+          <tr>
+            <td>
+              <div><span class="tool">linear.get_issue</span> <span class="badge cls-read">read</span></div>
+              <div class="muted small mono">ap-granted</div>
+              <div class="muted small args-size">Arguments, 2 B</div>
+              <pre class="why-text args">{}</pre>
+            </td>
+            <td class="hide-sm"><span class="badge secondary">grok</span></td>
+            <td><span class="badge ok"><span class="dot"></span>Approved</span></td>
+            <td class="hide-sm nowrap">20 min ago</td>
+            <td class="hide-sm nowrap">In 40 min</td>
+            <td class="r">
+              <div class="actions">
+                
+                <form method="post" action="/ui/approvals/ap-granted/deny">
+                  <input type="hidden" name="csrf" value="CSRF">
+                  <input type="hidden" name="created" value="2026-11-12T09:40:00Z">
+                  <button class="btn btn-destructive btn-sm" type="submit" aria-label="Revoke linear.get_issue for grok">Revoke</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        
+          <tr>
+            <td>
+              <div><span class="tool">github.create_issue</span> <span class="badge cls-write">write</span></div>
+              <div class="muted small mono">ap-denied</div>
+              <div class="muted small args-size">Arguments, 16 B</div>
+              <pre class="why-text args">{
+  &#34;title&#34;: &#34;spam&#34;
+}</pre>
+            </td>
+            <td class="hide-sm"><span class="badge secondary">muse</span></td>
+            <td><span class="badge err"><span class="dot"></span>Denied</span></td>
+            <td class="hide-sm nowrap">3 h ago</td>
+            <td class="hide-sm nowrap">In 21 h</td>
+            <td class="r">
+              <div class="actions">
+                <form method="post" action="/ui/approvals/ap-denied/approve">
+                  <input type="hidden" name="csrf" value="CSRF">
+                  <input type="hidden" name="created" value="2026-11-12T07:00:00Z">
+                  <button class="btn btn-primary btn-sm" type="submit" aria-label="Approve github.create_issue for muse">Approve</button>
+                </form>
+                
+              </div>
+            </td>
+          </tr>
+        
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+    </main>

@@ -238,6 +238,10 @@ function architectureSidebar() {
           text: "0023 Self-update",
           link: "/adr/0023-self-update",
         },
+        {
+          text: "0024 Approval gates",
+          link: "/adr/0024-approval-gates-on-remote-clients",
+        },
       ],
     },
   ];

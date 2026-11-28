@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -38,8 +39,10 @@ const (
 	// question was discarded.
 	KindCannotAsk Kind = "cannot_ask"
 	// KindInvalidRequestState: call_tool's requestState is not one the
-	// gateway issued for this user, tool, and arguments, or it expired.
-	// The upstream was not called.
+	// gateway issued for this user, tool, and arguments, or it expired, or,
+	// for a call the approval gate covers now or covered when the state was
+	// issued, it was used already or issued before the daemon last started
+	// (ADR 0024). The upstream was not called.
 	KindInvalidRequestState Kind = "invalid_request_state"
 	// KindInvalidScope: the request's project scope header does not parse
 	// or validate (ADR 0010). It is refused rather than ignored, which
@@ -53,6 +56,10 @@ const (
 	// because the client gave up or the daemon stopped; Err is the
 	// request context's error. Nothing failed. It has no Cases.
 	KindCanceled Kind = "canceled"
+	// KindApproval: the client's approval rule gates the call, and the
+	// owner has not approved exactly this call (ADR 0024). The upstream was
+	// not called. Approval is the approval's id, except on CaseQueueFull.
+	KindApproval Kind = "approval"
 )
 
 // Case is the finer reason within a [Kind] (GLOSSARY: Case). It is a
@@ -123,6 +130,17 @@ const (
 	// CaseSchemaMismatch: arguments fail the tool's inputSchema; Detail
 	// lists the failures.
 	CaseSchemaMismatch Case = "schema_mismatch"
+	// CaseAmbiguousArguments: the call is gated (ADR 0024), and its
+	// arguments repeat a key in an object (keys that look alike, by case
+	// or Unicode form, included), hold a string that isn't valid UTF-8, a
+	// lone surrogate escape included, or have data after the arguments
+	// object, so what the owner approves could differ from what the
+	// upstream reads.
+	CaseAmbiguousArguments Case = "ambiguous"
+	// CaseArgumentsTooLarge: the call is gated (ADR 0024), and its
+	// arguments are larger than 64 KiB or nest deeper than 32 levels, more
+	// than the owner can be asked to read. They are not echoed.
+	CaseArgumentsTooLarge Case = "too_large"
 )
 
 // Cases of [KindInternal].
@@ -151,6 +169,22 @@ const (
 	CaseNoElicitation Case = "no_elicitation"
 )
 
+// Cases of [KindApproval].
+const (
+	// CaseApprovalPending: the call waits for the owner's answer. The first
+	// gated call creates the approval; a repeat gets the same one.
+	CaseApprovalPending Case = "pending"
+	// CaseApprovalDenied: the owner denied the call. The denial stands until
+	// the approval expires.
+	CaseApprovalDenied Case = "denied"
+	// CaseApprovalExpired: the approval expired, pending, granted, or
+	// denied, before this call; it is dropped, so the next call asks again.
+	CaseApprovalExpired Case = "expired"
+	// CaseQueueFull: the client already has as many approvals as it may
+	// hold, so the call was refused without one. None was evicted.
+	CaseQueueFull Case = "queue_full"
+)
+
 // Error is every gateway-side failure (CODING_STANDARDS: Seam errors). It
 // is always handled as error; narrow it with [AsError].
 type Error struct {
@@ -166,6 +200,9 @@ type Error struct {
 	// Detail is the offending value, or the schema failures on
 	// CaseSchemaMismatch.
 	Detail string
+	// Approval is the approval id on a KindApproval error, for the owner's
+	// `wayfindr approvals approve <id>`; empty on CaseQueueFull.
+	Approval string
 	// Err is the cause, if any.
 	Err error
 }
@@ -233,6 +270,8 @@ func Advise(e *Error) Advice {
 }
 
 const (
+	adviseApprove = "Wait for the owner to approve it in Wayfindr, then call it again with the same arguments. " +
+		"Changed arguments need a new approval."
 	adviseSearch = "Use search_tools to find the tool and its qualified name."
 	adviseStdio  = "connect it with `wayfindr stdio`, which can ask clients of every version."
 )
@@ -262,6 +301,8 @@ func kindAdvice(e *Error) (summary, action string) {
 			"Tell the user; `wayfindr scope --profile " + e.Detail + "` shows the profiles the config defines."
 	case KindCanceled:
 		return "The request was cancelled before Wayfindr finished it.", "Try again."
+	case KindApproval:
+		return e.Tool + " needs the owner's approval before it runs" + approvalRef(e) + ".", adviseApprove
 	}
 
 	return "", "" // not a Kind constant
@@ -320,6 +361,14 @@ func caseAdvice(e *Error) (summary, action string) {
 	case CaseSchemaMismatch:
 		return "The arguments do not match " + e.Tool + "'s inputSchema:\n" + e.Detail,
 			"Fix the arguments and call again. Get the inputSchema with search_tools names=[\"" + e.Tool + "\"]."
+	case CaseAmbiguousArguments:
+		return e.Tool + " needs the owner's approval, and its arguments repeat a key in an object or hold text that isn't valid UTF-8, " +
+				"so the owner could approve something other than what runs. Keys that differ only in case or Unicode form count as the same key.",
+			"Send each key once per object, and only valid UTF-8 text, then call again."
+	case CaseArgumentsTooLarge:
+		return e.Tool + " needs the owner's approval, and its arguments are larger than " + strconv.Itoa(maxGatedArgsBytes>>10) +
+				" KiB or nest deeper than " + strconv.Itoa(maxGatedArgsDepth) + " levels, more than the owner can review.",
+			"Send smaller, flatter arguments, for example by splitting the work over several calls, then call again."
 	case CaseCatalog:
 		return "Wayfindr could not read its tool catalog.", "Try again; if it persists, check the daemon log."
 	case CaseUpstream:
@@ -333,9 +382,32 @@ func caseAdvice(e *Error) (summary, action string) {
 	case CaseNoElicitation:
 		return e.Tool + " needs your input, but your client does not support elicitation.",
 			"Use a client that supports elicitation, or " + adviseStdio
+	case CaseApprovalPending:
+		return e.Tool + " needs the owner's approval before it runs" + approvalRef(e) + ".", adviseApprove
+	case CaseApprovalDenied:
+		return "The owner denied " + e.Tool + " with these arguments" + approvalRef(e) + ".",
+			"Don't retry it. Tell the user it was denied; a call with other arguments needs its own approval."
+	case CaseApprovalExpired:
+		return "The owner's approval of " + e.Tool + " with these arguments" + approvalRef(e) + " has expired.",
+			"Call it again with the same arguments to ask again, then wait for the owner to approve it in Wayfindr."
+	case CaseQueueFull:
+		return e.Tool + " needs the owner's approval before it runs, but this client already has " +
+				strconv.Itoa(maxApprovals) + " open approvals (waiting, approved, or denied), so Wayfindr refused it.",
+			"A slot frees when an approved call is retried with the same arguments, or when an entry expires (within " +
+				strconv.Itoa(int(pendingTTL/time.Hour)) + " hours). Don't change the arguments: each variant needs a slot of its own."
 	}
 
 	return "", "" // no Case, or not a Case constant
+}
+
+// approvalRef is " (approval <id>)" for e's approval id, or "" without
+// one.
+func approvalRef(e *Error) string {
+	if e.Approval == "" {
+		return ""
+	}
+
+	return " (approval " + e.Approval + ")"
 }
 
 func list(names []string) string {

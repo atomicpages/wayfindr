@@ -11,7 +11,9 @@ package gateway
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -84,8 +86,12 @@ type Options struct {
 	// Sealer seals the requestState of call_tool's input_required
 	// results. Required.
 	Sealer *secrets.Sealer
-	// Now is the clock request states expire by. Nil means time.Now.
+	// Now is the clock request states and approvals expire by. Nil means
+	// time.Now.
 	Now func() time.Time
+	// ApprovalIDs is where approval ids' random bytes come from. Nil means
+	// crypto/rand; tests set it to draw known ids.
+	ApprovalIDs io.Reader
 	// Policy returns a connector's tool policy as the config now has it.
 	// call_tool refuses a tool it hides, even one a sync under an older
 	// policy left in the catalog. Nil exposes every tool.
@@ -122,7 +128,12 @@ type Gateway struct {
 	clock     func() time.Time
 	policy    func(connector string) config.ToolPolicy
 	profile   func(name string) (*config.Scope, bool)
-	handler   http.Handler
+	approvals *approvalQueue
+	// boot is a random id this Gateway seals into each request state, so a
+	// state the approval gate covers is taken only by the process that
+	// sealed it, whose approvals.spent remembers whether it was taken.
+	boot    string
+	handler http.Handler
 }
 
 // SetEmbedder replaces the query embedder and its timeout, as on an
@@ -157,6 +168,8 @@ func New(opts Options) *Gateway {
 		onSearch:  opts.OnSearch,
 		sealer:    opts.Sealer,
 		clock:     opts.Now,
+		approvals: newApprovalQueue(opts.ApprovalIDs),
+		boot:      rand.Text(),
 	}
 	server := mcp.NewServer(
 		&mcp.Implementation{Name: "wayfindr", Version: version},

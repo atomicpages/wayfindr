@@ -46,6 +46,10 @@ htmx refuses to follow a redirect off this origin. */}}
       <legend>Connectors</legend>
       {{if .Connectors}}{{template "picker" (picker .Connectors .Picked)}}{{else}}<span class="muted">No connectors are configured yet. <a href="/ui/add">Add one</a> first.</span>{{end}}
     </fieldset>
+    <label class="field" for="grant-approval"><span>Calls that need your approval</span>
+      <textarea id="grant-approval" name="approval" rows="3" autocomplete="off" spellcheck="false" aria-describedby="grant-approval-hint">{{.Approval}}</textarea>
+      <small class="hint" id="grant-approval-hint">One entry per line; matching calls wait until you approve them in Wayfindr. <code>@write</code> covers tools that change things, <code>@destructive</code> tools that delete or overwrite, <code>github.delete_*</code> tools by name, and <code>!github.delete_draft</code> exempts a tool. <code>@write</code> does not cover destructive tools or tools without annotations: add <code>@destructive</code> for those. Leave it empty for none.</small>
+    </label>
     <div class="actions">
       <button class="btn btn-primary" type="submit">Approve</button>
       <button class="btn btn-destructive" type="submit" formaction="/ui/oauth/deny" formnovalidate>Deny</button>

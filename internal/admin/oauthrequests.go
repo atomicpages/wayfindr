@@ -15,7 +15,8 @@ import (
 )
 
 // MaxOAuthApprovalBody bounds the body of POST
-// /admin/oauth/requests/{id}/approve: a name and a list of connector names.
+// /admin/oauth/requests/{id}/approve: a name, a list of connector names, and
+// the approval entries.
 const MaxOAuthApprovalBody = 4 << 10
 
 // maxOAuthEmptyBody bounds the optional body of the arm and the deny: none
@@ -48,13 +49,14 @@ type OAuthRequests interface {
 	// grant name to suggest. An unknown, expired, answered, or unclaimable
 	// id is an error wrapping store.ErrNotFound.
 	Get(ctx context.Context, id string) (OAuthRequest, error)
-	// Approve creates the grant and returns the URL the browser goes to
+	// Approve creates the grant, with its approval entries (nil for none;
+	// admin has checked them), and returns the URL the browser goes to
 	// next. store.ErrNotFound as for Get, and for an id Get has not
 	// claimed; store.ErrExists for a taken name, in which case the request
 	// stays claimed; ErrInvalidApproval for a name that cannot be one;
 	// ErrContested, changing nothing, when the request's Arrived is above
 	// one.
-	Approve(ctx context.Context, id, name string, connectors []string) (redirect string, err error)
+	Approve(ctx context.Context, id, name string, connectors, approval []string) (redirect string, err error)
 	// Deny ends the request and returns the URL the browser goes to next.
 	// store.ErrNotFound as for Approve.
 	Deny(ctx context.Context, id string) (redirect string, err error)
@@ -93,6 +95,11 @@ type OAuthApproval struct {
 	// Connectors are the configured connectors the grant may use; at least
 	// one.
 	Connectors []string `json:"connectors"`
+	// Approval is the grant's approval entries (ADR 0024): which of its
+	// calls wait for the owner's approval. Each must pass
+	// config.ParseApproval, and name only connectors in Connectors. Absent
+	// or empty gates nothing.
+	Approval []string `json:"approval,omitempty"`
 }
 
 // OAuthDecision is the response to approve and deny.
@@ -219,7 +226,7 @@ func (a api) approveOAuthRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		http.Error(w, `body must be {"name": "…", "connectors": ["…"]}`, http.StatusBadRequest)
+		http.Error(w, `body must be {"name": "…", "connectors": ["…"], "approval": ["…"]}`, http.StatusBadRequest)
 
 		return
 	}
@@ -228,13 +235,20 @@ func (a api) approveOAuthRequest(w http.ResponseWriter, r *http.Request) {
 	// client token's. The words are the approve page's own.
 	connectors, msg := a.checkTokenSpec(TokenSpec{Name: in.Name, Connectors: in.Connectors}, "connection")
 
+	var approval []string
+
+	if msg == "" {
+		// A grant is always remote (ADR 0022).
+		approval, msg = checkApproval(in.Approval, true, connectors, "connection")
+	}
+
 	if msg != "" {
 		http.Error(w, msg, http.StatusBadRequest)
 
 		return
 	}
 
-	redirect, err := a.OAuth.Approve(r.Context(), r.PathValue("id"), in.Name, connectors)
+	redirect, err := a.OAuth.Approve(r.Context(), r.PathValue("id"), in.Name, connectors, approval)
 
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -262,7 +276,7 @@ func (a api) approveOAuthRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The redirect holds the authorization code: it is answered, never logged.
-	a.Logger.Info().Str("grant", in.Name).Strs("connectors", connectors).Msg("oauth grant approved")
+	a.Logger.Info().Str("grant", in.Name).Strs("connectors", connectors).Strs("approval_entries", approval).Msg("oauth grant approved")
 	writeJSON(w, OAuthDecision{Redirect: redirect, Name: in.Name})
 }
 

@@ -47,6 +47,9 @@ type env struct {
 	url     string
 	manager *upstream.Manager
 	gateway *gateway.Gateway
+	// options are the gateway's, so a test can start another over the
+	// same upstreams, catalog, and master key, as a restart would.
+	options gateway.Options
 }
 
 // envOptions configures newEnvWith. embedder, when set, embeds the catalog
@@ -63,6 +66,9 @@ type envOptions struct {
 	// syncPolicy is the tool policy the catalog was synced under; nil
 	// exposes every tool. gateway.Policy is the one call_tool checks.
 	syncPolicy func(connector string) config.ToolPolicy
+	// logs, when set, receives the gateway's log as JSON lines; nil
+	// discards it.
+	logs io.Writer
 }
 
 // newEnv starts one Streamable fake per connector in fakes (connector name
@@ -140,6 +146,10 @@ func newEnvWith(t *testing.T, o envOptions) env {
 	opts := o.gateway
 	opts.Upstreams, opts.Catalog, opts.UserID, opts.Logger = m, st, user, zerolog.Nop()
 
+	if o.logs != nil {
+		opts.Logger = zerolog.New(o.logs)
+	}
+
 	if opts.Sealer == nil {
 		sealer, err := secrets.NewSealer(make([]byte, secrets.KeySize))
 
@@ -157,7 +167,7 @@ func newEnvWith(t *testing.T, o envOptions) env {
 		srv.Close()
 	})
 
-	return env{url: srv.URL, manager: m, gateway: g}
+	return env{url: srv.URL, manager: m, gateway: g, options: opts}
 }
 
 // connect opens an SDK client session to the gateway at version, and

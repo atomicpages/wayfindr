@@ -9,7 +9,7 @@ internal/cli/                   cobra commands: parse flags, then call admin.Cli
 internal/setup/                 wayfindr init: default config, master key, store + local user, client token; the report with quick-connect commands and importable clients
 internal/clientconfig/          connector import: read other clients' MCP configs (JSONC, TOML), plan their entries as connectors and secrets
 internal/clienttoken/           client tokens: Read (WAYFINDR_CLIENT_TOKEN over <data>/client-token), Generate, Digest; Client (what a token resolves to) and its TokenInfo round trip; Registry of scoped tokens and OAuth grants' access tokens (AddUntil: with an expiry)
-internal/config/                types, strict decode, defaults, validation, ${…} templates, Diff; tools lists (ToolPolicy); project scopes, profiles, Narrowing; the file editor (AppendConnector, EditConnector, RemoveConnector, SetPublicURL, SetOAuthEnabled); ListenAddress; Server.Issuer
+internal/config/                types, strict decode, defaults, validation, ${…} templates, Diff; tools lists (ToolPolicy); approval entries (approval.go: ParseApproval, ApprovalRule, whose globs let * and ? cross /); project scopes, profiles, Narrowing; the file editor (AppendConnector, EditConnector, RemoveConnector, SetPublicURL, SetOAuthEnabled); ListenAddress; Server.Issuer
 internal/secrets/               master-key sourcing, Sealer (AES-256-GCM)
 internal/resolve/               config.Resolver: ${env:…} from the environment, ${secret:…} from sealed store rows; PutSecret seals one
 internal/store/                 Store interface, row types, PlanCatalog, migration runner
@@ -26,11 +26,11 @@ internal/catalog/               Syncer: tool list → entries (the tools list ap
 internal/auth/                  Broker: discovery, registration, token source, RoundTripper, credential health; Flows: the one auth-flow entry; Pages; Probe
 internal/oauthserver/           Wayfindr's own authorization server (ADR 0022): metadata documents, authorize, pending authorizations, codes, the token endpoint, CIMD fetch; Approve/Deny for the console
 internal/upstream/              Manager: connector lifecycle, state machine, transports, Call/Continue/ListTools/PeekTools, elicitation
-internal/gateway/               client-facing MCP server: search_tools, call_tool, request narrowing, schema validation, input_required round trip, call recording
+internal/gateway/               client-facing MCP server: search_tools, call_tool, request narrowing, schema validation, input_required round trip, the approval queue (ADR 0024, approvals.go: gate, Approve, Deny, in memory), call recording
 internal/httpd/                 listener, routes, Host/Origin/bearer guards (handlers are injected)
-internal/admin/                 the /admin API: routes, handlers, request/response types, and the Client the CLI calls (NewLocalClient: in process)
-internal/webui/                 the /ui web console: pages over admin.Client, login codes and sessions, embedded templates and assets
-internal/daemon/                wiring, config watcher and reload, poll, recovery, call-log writer, health check, client-token registry, usage-report schedule, shutdown
+internal/admin/                 the /admin API: routes, handlers (including /admin/approvals, approvals.go), request/response types, and the Client the CLI calls (NewLocalClient: in process)
+internal/webui/                 the /ui web console: pages over admin.Client (including /ui/approvals), login codes and sessions, embedded templates and assets
+internal/daemon/                wiring (the gateway's approval queue to the admin API, approvals.go), config watcher and reload, poll, recovery, call-log writer, health check, client-token registry, usage-report schedule, shutdown
 internal/shim/                  wayfindr stdio: stdio MCP server forwarding to /mcp with scope and profile headers; relays elicitation; starts the daemon on demand
 internal/daemonctl/             the daemon from outside: Ensure (start detached), Stop (SIGTERM the lock holder), Tail (the daemon log)
 internal/daemonlock/            the daemon lock: OS file lock in the data dir naming its holder (daemon takes, daemonctl probes)
@@ -38,7 +38,7 @@ internal/service/               wayfindr service install/uninstall: launchd agen
 internal/selfupdate/            wayfindr update (ADR 0023): latest release tag, version comparison, download + checksums.txt check, extract, in-place binary swap
 internal/telemetry/             the opt-in usage report (ADR 0020): Report schema, allowlists, proof-of-work, Reporter (counts, install ID, POST)
 internal/paths/                 XDG-style paths for config, data, token, key file, lock, log, telemetry ID
-internal/redact/                URL query/fragment redaction for errors, logs, and stored text (§9); Printable for upstream text shown in a terminal
+internal/redact/                URL query/fragment redaction for errors, logs, and stored text (§9); Printable for upstream text shown in a terminal, Visible and VisibleArguments for text the owner decides on (approvals, ADR 0024)
 internal/toolsonly/             MCP receiving middleware: -32601 for prompts/resources/completion (gateway and shim)
 internal/newfile/               file writes: create-only (O_EXCL, pinned mode, removed on failure) and atomic replace (same-dir temp, fsync, rename, follows symlinks)
 internal/testutil/              fakeupstream (stdio helper, Streamable, SSE; per protocol version), fakeas, fakekeychain,
@@ -65,9 +65,10 @@ grants and tokens, and the registry, only through its `Grants` interface, which
 `catalog → {store, embed, config, redact}`,
 `upstream → {config, redact, httpclient}`,
 `admin → {store, config, clienttoken}`, and `httpd → clienttoken` alone.
-`webui → {admin, store, upstream}` sits beside them: it reads only through
+`webui → {admin, store, upstream, redact}` sits beside them: it reads only through
 `admin.Client` (the daemon passes `admin.NewLocalClient`) and imports `store`
-and `upstream` for the state and result types the admin bodies carry. Nothing
+and `upstream` for the state and result types the admin bodies carry, and
+`redact` to show an approval's text. Nothing
 but `daemon` imports `webui`; `admin` gets its login codes through
 `Options.UILogin`, a function `daemon` wires to `webui.Sessions`. Nothing but
 `daemon` imports `oauthserver` either: `admin` reaches its pending

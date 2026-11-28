@@ -139,7 +139,12 @@ type Options struct {
 	// (design §2). It must neither store nor log token. Nil answers POST
 	// /admin/remote/test with 501.
 	TestRemote func(ctx context.Context, publicURL, token string) RemoteTestResult
-	Logger     zerolog.Logger
+	// Approvals lists and answers the gateway's pending approvals (ADR
+	// 0024). The daemon adapts the gateway to it; admin cannot import
+	// gateway (design §2). Nil answers every /admin/approvals request with
+	// 501.
+	Approvals Approvals
+	Logger    zerolog.Logger
 }
 
 // The routes' paths. Client builds its requests from the same constants.
@@ -158,6 +163,7 @@ const (
 	pathConnectors = "/admin/connectors"
 	pathPublicURL  = "/admin/server/public-url"
 	pathRemoteTest = "/admin/remote/test"
+	pathApprovals  = "/admin/approvals"
 
 	pathOAuthSettings = "/admin/server/oauth"
 )
@@ -192,6 +198,9 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("GET "+pathOAuthRequests+"{id}", a.withOAuth(a.getOAuthRequest))
 	mux.HandleFunc("POST "+pathOAuthRequests+"{id}/approve", a.withOAuth(a.approveOAuthRequest))
 	mux.HandleFunc("POST "+pathOAuthRequests+"{id}/deny", a.withOAuth(a.denyOAuthRequest))
+	mux.HandleFunc("GET "+pathApprovals, a.withApprovals(a.listApprovals))
+	mux.HandleFunc("POST "+pathApprovals+"/{id}/approve", a.withApprovals(a.approveApproval))
+	mux.HandleFunc("POST "+pathApprovals+"/{id}/deny", a.withApprovals(a.denyApproval))
 
 	return mux
 }

@@ -59,7 +59,7 @@ func TestCallPassesTheRequestAndAnswersTheResult(t *testing.T) {
 	c, log := callAPI(t, func(_ context.Context, req admin.CallRequest) (admin.CallOutcome, error) {
 		got = req
 
-		return admin.CallOutcome{Result: result, Class: "write"}, nil
+		return admin.CallOutcome{Result: result, Class: "write", Approval: "a3f2"}, nil
 	})
 
 	req := admin.CallRequest{
@@ -80,8 +80,8 @@ func TestCallPassesTheRequestAndAnswersTheResult(t *testing.T) {
 		t.Errorf("request (-sent +received):\n%s", diff)
 	}
 
-	if diff := cmp.Diff(string(result), string(res.Result)); diff != "" || res.Class != "write" || res.ElapsedMS < 0 {
-		t.Errorf("response %+v, want the result, class write, and an elapsed time\n%s", res, diff)
+	if diff := cmp.Diff(string(result), string(res.Result)); diff != "" || res.Class != "write" || res.Approval != "a3f2" || res.ElapsedMS < 0 {
+		t.Errorf("response %+v, want the result, class write, approval a3f2, and an elapsed time\n%s", res, diff)
 	}
 
 	decoded, err := res.Decode()

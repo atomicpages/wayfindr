@@ -36,6 +36,9 @@ type callDaemon struct {
 	answers  []string
 	// toolsErr, when set, is how the tool listing fails.
 	toolsErr error
+	// approval, when set, is the id of the pending approval each answer
+	// carries, as the daemon does for a call the gateway held.
+	approval string
 }
 
 func (d *callDaemon) call(_ context.Context, req admin.CallRequest) (admin.CallOutcome, error) {
@@ -45,7 +48,7 @@ func (d *callDaemon) call(_ context.Context, req admin.CallRequest) (admin.CallO
 	d.requests = append(d.requests, req)
 	i := min(len(d.requests), len(d.answers)) - 1
 
-	return admin.CallOutcome{Result: json.RawMessage(d.answers[i]), Class: "write"}, nil
+	return admin.CallOutcome{Result: json.RawMessage(d.answers[i]), Class: "write", Approval: d.approval}, nil
 }
 
 func (d *callDaemon) got() []admin.CallRequest {
@@ -399,4 +402,59 @@ func TestReadLineWrapsAFailedRead(t *testing.T) {
 	if _, err := readLine(bufio.NewReader(strings.NewReader(""))); !errors.Is(err, errNoAnswer) {
 		t.Errorf("readLine at EOF = %v, want errNoAnswer", err)
 	}
+}
+
+const pendingRefusal = `{"content":[{"type":"text","text":"linear.create_issue needs the owner's approval before it runs (approval a3f2).\n` +
+	`To fix: Wait for the owner to approve it in Wayfindr, then call it again with the same arguments."}],"isError":true}`
+
+// TestCallOffersTheApproveCommandForAPendingRefusal: a call the gateway held
+// for the owner's approval prints the refusal and then the command that
+// approves it, from the approval id the daemon returned beside the result
+// and not from the refusal's text. Any other refusal gets no such line.
+func TestCallOffersTheApproveCommandForAPendingRefusal(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "grok.token")
+
+	if err := os.WriteFile(file, []byte("wf_s_grok\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	args := []string{"call", "linear.create_issue", "--args", `{"team":"core","title":"x"}`, "--yes", "--token-file", file}
+
+	t.Run("pending", func(t *testing.T) {
+		host, d := newCallDaemon(t, pendingRefusal)
+		d.approval = "a3f2"
+		stdout, _, code := run(t, host, args...)
+
+		if code != 1 {
+			t.Errorf("exit code = %d, want 1: the call was refused", code)
+		}
+
+		if !strings.Contains(stdout, "needs the owner's approval before it runs (approval a3f2).") ||
+			!strings.HasSuffix(stdout, "\nTo approve it: wayfindr approvals approve a3f2\n") {
+			t.Errorf("stdout %q, want the refusal, then the approve command", stdout)
+		}
+	})
+
+	t.Run("the id comes from the response, not the text", func(t *testing.T) {
+		// A refusal whose text names an approval, but with no id returned
+		// (a denied one): no command is offered.
+		host, _ := newCallDaemon(t, pendingRefusal)
+		stdout, _, code := run(t, host, args...)
+
+		if code != 1 || strings.Contains(stdout, "To approve it") {
+			t.Errorf("exit %d, stdout %q, want the refusal alone", code, stdout)
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		host, d := newCallDaemon(t, pendingRefusal)
+		d.approval = "a3f2"
+		stdout, _, _ := run(t, host, append(args, "--json")...)
+
+		var got admin.CallResponse
+
+		if err := json.Unmarshal([]byte(stdout), &got); err != nil || got.Approval != "a3f2" || strings.Contains(stdout, "To approve it") {
+			t.Errorf("stdout %q (%v), want the response with approval a3f2 and no prose", stdout, err)
+		}
+	})
 }

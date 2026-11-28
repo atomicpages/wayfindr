@@ -144,6 +144,38 @@ as "design §9".
   changed public URL, or the client removed from `clients`, suspends it;
   reverting the change restores it. Codes, tokens, verifiers, challenges, and
   `state` are never logged; error pages and token errors echo no input.
+- Approval gates (ADR 0024, [§7.6](7.6-gateway.md)): a remote client token or an
+  OAuth grant can hold some of its calls until the owner answers. *Protected:*
+  an agent that reaches Wayfindr only through a remote token or grant, through
+  the tunnel: it can't reach `/admin/` or `/ui/` (loopback only, §7.7), so it
+  can't approve its own call, however it is prompted, and no client message,
+  elicitation, or `input_required` answers one. The owner sees the arguments as
+  the gateway holds them (`redact.Visible`), and an approval binds the client
+  token instance (name and creation time, so a token created again under a
+  revoked name inherits nothing), the tool, and a digest of the arguments; it is
+  spent by the next matching call, even a failed one. A gated call whose
+  arguments repeat a key (keys that look alike by case or Unicode form included) or aren't valid
+  UTF-8 is refused, so the digest is of what the upstream reads, and so is one
+  whose arguments are over 64 KiB or 32 levels deep, which bounds what the
+  owner reads and the queue holds. A resumed `input_required` skips the gate,
+  but its state is bound to the instance and taken once, and only by the
+  process that sealed it (its boot id), so a restart, which forgets the spent
+  states, can't replay it. Entries that no longer parse
+  gate every call of the client (fail closed). At most 8 live entries per
+  client, refusing the ninth rather than evicting; arguments live only in the
+  in-memory queue, never stored or logged, and a restart drops it.
+  *Not protected:* a local agent, which can approve its own calls with the
+  default token the admin API accepts (so `--approval` is refused on a token
+  that isn't remote, by the CLI and by the admin API); an upstream that labels a
+  destructive tool read-only (class entries trust its annotations; name the
+  tool); an owner who approves a bad call; what the upstream does with an
+  approved call. The arguments are shown in full and unredacted (console, CLI,
+  `GET /admin/approvals`; `redact.Visible` only escapes invisible characters
+  and runs of spaces, and the console and CLI show them decoded, keys sorted),
+  so a secret in one is shown and the listing is
+  sensitive; only the owner reaches it (the default token, or a console
+  session). *Not bound:* the entries are fixed at creation and
+  never edited; expiry is checked on access, so `expired` is best effort.
 - Log redaction: header values, tokens, codes, secret values, and URL query
   strings are never logged. The values of a connector's `${…}` references (url,
   headers, args, env) are masked as the reference wherever they sit, a url's

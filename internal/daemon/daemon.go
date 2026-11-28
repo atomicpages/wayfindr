@@ -518,6 +518,7 @@ func New(ctx context.Context, opts Options) (d *Daemon, err error) {
 		SetPublicURL:    writer.setPublicURL,
 		SetOAuthEnabled: writer.setOAuthEnabled,
 		TestRemote:      remoteTester.test,
+		Approvals:       adminApprovals{gw: gw},
 		Logger:          log,
 	})
 	// The console reads through the admin API in process, so it and the

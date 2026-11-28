@@ -33,6 +33,7 @@ sign in again.
 | Calls         | The call log, newest first, with each result's size, filtered by connector or by calls that did not end OK.            | Open a call that failed to read its error.                                               |
 | Search        | What `search_tools` returns to a client for a query, with each tool's word and meaning ranks.       |                                                                                          |
 | Client tokens | Your scoped client tokens and OAuth grants (marked `oauth` with the client's host), their connectors, which are remote, and when each was last used. | Create a token (shown once), revoke a token or a grant.                          |
+| Approvals     | The calls of remote clients that wait for you: client, tool, class, state, age, and every argument. | Approve or deny a call, revoke an approval ([Approving calls](#approving-calls)).       |
 | Cloud agents  | The remote tokens and OAuth grants you made for cloud agents, their connectors, and when each was last used. | Connect Grok Bot, Muse, or ChatGPT step by step, test the connection, revoke a token or grant. |
 
 A connector whose name matches a brand (`gmail`, `github-work`) shows that
@@ -107,8 +108,9 @@ page**, on this computer. It shows the client and its host, the host your browse
 returns to, when the request started, and the IP address your tunnel reported,
 labelled "reported by your tunnel". It warns you to approve only if you clicked
 Connect in the client a few minutes ago, and to choose Deny if someone sent you the
-link. You keep or change the name, tick the connectors, and select **Approve** or
-**Deny**; your browser then goes back to the client. A plain page with a
+link. You keep or change the name, tick the connectors, optionally list the calls
+that need your approval (one entry per line, [as for a token](./access/scoped-tokens#approval-gates)),
+and select **Approve** or **Deny**; your browser then goes back to the client. A plain page with a
 **Continue** button may come first, because your browser arrives from another site
 and the console doesn't know you yet: select **Continue**. If it comes back, you
 aren't signed in: run `wayfindr ui`, then select **Continue** again. See
@@ -120,6 +122,60 @@ Bot's token. For Muse, paste the token only into Muse's secure credential
 prompt, never into the chat. See
 [Remote tokens](./access/scoped-tokens#remote-tokens) for what one can do, and
 [ADR 0021](../adr/0021-remote-client-tokens) for why remote tokens exist.
+
+## Approving calls
+
+A remote client can have some of its calls held until you approve them. You
+name those calls with approval entries when the client is created, such as
+`@destructive` for every destructive tool
+([the entries](./access/scoped-tokens#approval-gates)). The console takes them in
+one place only: the approve page for an OAuth connection, such as ChatGPT's. Its
+form for a remote token has no approval field. Create that token with
+`wayfindr token create --remote --approval <entry>` instead. Entries are fixed
+at creation.
+
+When such a client makes a gated call, Wayfindr refuses it and the call waits on
+the **Approvals** page. The sidebar shows how many wait, and hides the
+count when none do.
+
+Each row shows the client, the tool and its class, the size of the arguments,
+and the arguments. The arguments are always shown in full, never cut and never
+in a scroll box, and unredacted: a secret an agent puts in one is shown to you.
+They are shown as they decode, which is how the approval reads them: an escape
+such as `\u0072` shows as the `r` it stands for, numbers stay as sent, and keys
+are shown in sorted order (the order doesn't change the call). Arguments nested
+very deeply, or that would take far more room laid out than as sent, are shown
+on one line.
+Characters you can't see or that a terminal would obey, such as escape
+sequences, zero-width and other blank characters, and spaces other than the
+plain one, are shown as `\uXXXX` escapes, or `\U000XXXXX` above U+FFFF, and
+bytes that aren't valid UTF-8 as `\xXX`. So is each plain space after the
+second in a row, and each combining mark after the second on one character, so
+nothing can push text out of view. The client and tool names, the class, and
+the id get the same escapes. A size far larger than the arguments you can see
+means something is hiding; read them again before you approve.
+
+| State    | Buttons             | What it means                                                                                  |
+| -------- | ------------------- | ---------------------------------------------------------------------------------------------- |
+| Waiting  | Approve, Deny       | The client's call was refused and waits for you. It expires 24 hours after it was made.        |
+| Approved | Revoke              | The client's next identical call runs once. It expires 1 hour after you approved it.           |
+| Denied   | Approve             | Matching calls are refused until the entry expires. You can still approve it.                  |
+
+An approval covers one call with exactly the arguments you saw. After you
+approve, the agent has to make the same call again, and that call runs and uses
+the approval up. A call with any other argument is a new entry. **Revoke** is a
+deny: it withdraws an approval before the agent uses it.
+
+The page refreshes every 10 seconds, except while your pointer or focus is on
+the list and for 5 seconds after you tap, click, scroll, or type. An entry leaves the list when it expires
+or when the agent uses its approval up. If you answer an entry that is already
+gone, or whose id now names another call because Wayfindr restarted, nothing
+changes and the console shows the daemon's message. Reload the page and read
+the call again.
+
+Only you can answer: the console answers on this computer's loopback address,
+which a remote client cannot reach. `wayfindr approvals` lists and answers the
+same entries in a terminal.
 
 ## What it doesn't do
 

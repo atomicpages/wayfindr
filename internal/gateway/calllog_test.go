@@ -350,7 +350,7 @@ func TestCallServesAnyDoorAsCallToolDoes(t *testing.T) {
 				args, _ = json.Marshal(a)
 			}
 
-			viaCore := e.gateway.Call(t.Context(), gateway.CallRequest{Name: name, Args: args}, opts)
+			viaCore := e.gateway.Call(t.Context(), gateway.CallRequest{Name: name, Args: args}, opts).Result
 			fromCore := rec.take()
 
 			if diff := cmp.Diff(asJSON(t, viaMCP), asJSON(t, viaCore)); diff != "" {
@@ -407,7 +407,7 @@ func TestCallRefusesACallWithoutNarrow(t *testing.T) {
 	})
 	res := e.gateway.Call(t.Context(),
 		gateway.CallRequest{Name: "linear.create_issue", Args: json.RawMessage(`{"title":"x"}`)},
-		gateway.CallOptions{Client: clienttoken.Default()})
+		gateway.CallOptions{Client: clienttoken.Default()}).Result
 
 	if !res.IsError {
 		t.Errorf("result %+v, want an error", res)

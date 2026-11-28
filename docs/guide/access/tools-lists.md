@@ -40,6 +40,10 @@ you save the file.
 A list of only `!` entries allows everything else. The exact rules are in the
 [configuration reference](/reference/configuration#tools).
 
+Don't confuse this with [approval gates](./scoped-tokens#approval-gates), which
+hold a remote client's calls for your answer instead of hiding tools. There each
+class stands alone: `@write` doesn't include `@read` tools, or destructive ones.
+
 ## See a connector's tools first
 
 To see what a connector offers before you write its list, ask the daemon:

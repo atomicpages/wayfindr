@@ -76,6 +76,7 @@ CREATE TABLE client_tokens (            -- scoped client tokens (ADR 0012)
   created_at   INTEGER NOT NULL,
   last_used_at INTEGER,                   -- NULL until first use
   remote       INTEGER NOT NULL DEFAULT 0, -- 1: may reach /mcp through a tunnel (ADR 0021); fixed at creation
+  approval     TEXT,                      -- JSON array of approval entries (ADR 0024); NULL = none; fixed at creation
   PRIMARY KEY (user_id, name)
 );
 
@@ -87,6 +88,7 @@ CREATE TABLE oauth_grants (             -- OAuth grants (ADR 0022); names shared
   connectors   TEXT NOT NULL,             -- JSON array of connector names, at least one
   created_at   INTEGER NOT NULL,
   last_used_at INTEGER,                   -- NULL until its access token is first used
+  approval     TEXT,                      -- JSON array of approval entries (ADR 0024); NULL = none; fixed at creation
   PRIMARY KEY (user_id, name)
 );
 
@@ -154,6 +156,16 @@ CREATE INDEX calls_user_started ON calls (user_id, started_at DESC, id DESC);
   `TouchClientTokens` is keyed by digest, never moves `last_used_at` backwards,
   and ignores digests revoked since they were used, so a token created again
   under a revoked name never inherits the old one's last use.
+  `approval` (ADR 0024) holds the token's approval entries as given: a JSON
+  array in SQLite `TEXT`, `text[]` in Postgres, NULL for none (an empty list is
+  stored as NULL, and every row made before the migration has none). It is set
+  at creation and never updated, like `connectors` and `remote`; SQLite
+  `0010_approval.sql` and Postgres `0014_approval.sql` add it to both
+  `client_tokens` and `oauth_grants`. The store doesn't parse the entries: the
+  admin API checks them with `config.ParseApproval` before a row is made, and
+  the gateway parses them again on each call, failing closed on entries that no
+  longer parse. The approval queue itself is never stored (§7.6): a pending
+  call's arguments are not written anywhere.
 - **OAuth grants** (ADR 0022, [§7.11](7.11-oauthserver.md)) are SQLite
   `0008_oauth.sql` and Postgres `0012_oauth.sql`, additive only. Postgres uses
   `uuid` for `user_id`, `text[]` for `connectors` (`cardinality > 0`),
@@ -223,6 +235,7 @@ CREATE INDEX calls_user_started ON calls (user_id, started_at DESC, id DESC);
   | `0007_client_token_remote`            | `0011_client_token_remote`                    |
   | `0008_oauth`                          | `0012_oauth`                                  |
   | `0009_call_result_bytes`              | `0013_call_result_bytes`                      |
+  | `0010_approval`                       | `0014_approval`                               |
 
 - **SQLite settings.** WAL, `busy_timeout=5000`, `foreign_keys=ON`. The daemon
   is the only writer ([§9](9-security.md)).

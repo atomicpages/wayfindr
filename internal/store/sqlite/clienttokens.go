@@ -32,13 +32,19 @@ func (s *Store) CreateClientToken(ctx context.Context, t store.ClientToken) erro
 		return fmt.Errorf("create client token %s: %w", t.Name, err)
 	}
 
+	approval, err := marshalApproval(t.Approval)
+
+	if err != nil {
+		return fmt.Errorf("create client token %s: approval: %w", t.Name, err)
+	}
+
 	// One statement, so the check for a grant of that name and the insert are
 	// atomic: SQLite holds the write lock from the statement's start.
-	res, err := s.db.ExecContext(ctx, `INSERT INTO client_tokens (user_id, name, digest, connectors, created_at, remote)
-		SELECT ?1, ?2, ?3, ?4, ?5, ?6
+	res, err := s.db.ExecContext(ctx, `INSERT INTO client_tokens (user_id, name, digest, connectors, created_at, remote, approval)
+		SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
 		WHERE NOT EXISTS (SELECT 1 FROM oauth_grants WHERE user_id = ?1 AND name = ?2)
 		ON CONFLICT DO NOTHING`,
-		t.UserID, t.Name, t.Digest[:], string(connectors), t.CreatedAt.UnixMilli(), t.Remote)
+		t.UserID, t.Name, t.Digest[:], string(connectors), t.CreatedAt.UnixMilli(), t.Remote, approval)
 
 	if err != nil {
 		return fmt.Errorf("create client token %s: %w", t.Name, err)
@@ -59,7 +65,7 @@ func (s *Store) CreateClientToken(ctx context.Context, t store.ClientToken) erro
 
 // ListClientTokens implements store.Store.
 func (s *Store) ListClientTokens(ctx context.Context, userID string) ([]store.ClientToken, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, digest, connectors, created_at, last_used_at, remote
+	rows, err := s.db.QueryContext(ctx, `SELECT name, digest, connectors, created_at, last_used_at, remote, approval
 		FROM client_tokens WHERE user_id = ? ORDER BY name`, userID)
 
 	if err != nil {
@@ -75,11 +81,12 @@ func (s *Store) ListClientTokens(ctx context.Context, userID string) ([]store.Cl
 			t          = store.ClientToken{UserID: userID}
 			digest     []byte
 			connectors string
+			approval   sql.NullString
 			createdAt  int64
 			lastUsedAt sql.NullInt64
 		)
 
-		if err := rows.Scan(&t.Name, &digest, &connectors, &createdAt, &lastUsedAt, &t.Remote); err != nil {
+		if err := rows.Scan(&t.Name, &digest, &connectors, &createdAt, &lastUsedAt, &t.Remote, &approval); err != nil {
 			return nil, fmt.Errorf("list client tokens: %w", err)
 		}
 
@@ -91,6 +98,10 @@ func (s *Store) ListClientTokens(ctx context.Context, userID string) ([]store.Cl
 
 		if err := json.Unmarshal([]byte(connectors), &t.Connectors); err != nil {
 			return nil, fmt.Errorf("list client tokens: %s: connectors: %w", t.Name, err)
+		}
+
+		if t.Approval, err = unmarshalApproval(approval); err != nil {
+			return nil, fmt.Errorf("list client tokens: %s: approval: %w", t.Name, err)
 		}
 
 		t.CreatedAt = time.UnixMilli(createdAt)
@@ -163,3 +174,34 @@ func (s *Store) TouchClientTokens(ctx context.Context, userID string, used map[[
 }
 
 func compareDigests(a, b [sha256.Size]byte) int { return bytes.Compare(a[:], b[:]) }
+
+// marshalApproval is the approval column for entries: a JSON array, or NULL
+// for none, so an empty list and an absent one read back the same.
+func marshalApproval(entries []string) (sql.NullString, error) {
+	if len(entries) == 0 {
+		return sql.NullString{}, nil
+	}
+
+	b, err := json.Marshal(entries)
+
+	if err != nil {
+		return sql.NullString{}, err
+	}
+
+	return sql.NullString{String: string(b), Valid: true}, nil
+}
+
+// unmarshalApproval is the inverse of marshalApproval: nil for NULL.
+func unmarshalApproval(col sql.NullString) ([]string, error) {
+	if !col.Valid {
+		return nil, nil
+	}
+
+	var entries []string
+
+	if err := json.Unmarshal([]byte(col.String), &entries); err != nil {
+		return nil, err
+	}
+
+	return entries, nil
+}

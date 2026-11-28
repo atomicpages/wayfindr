@@ -19,7 +19,7 @@ import (
 // caller is the part of the gateway the admin API's call route uses.
 // *gateway.Gateway satisfies it.
 type caller interface {
-	Call(ctx context.Context, r gateway.CallRequest, opts gateway.CallOptions) *mcp.CallToolResult
+	Call(ctx context.Context, r gateway.CallRequest, opts gateway.CallOptions) gateway.CallResponse
 	Class(ctx context.Context, connector, tool string) (config.ToolClass, bool)
 }
 
@@ -61,7 +61,7 @@ func adminCall(gw caller, defaultSum [sha256.Size]byte, tokens tokenLookup) func
 			}
 		}
 
-		res := gw.Call(ctx, r, gateway.CallOptions{
+		reply := gw.Call(ctx, r, gateway.CallOptions{
 			Client:     client,
 			ClientName: req.Client,
 			Narrow:     func() (config.Narrowing, error) { return config.Narrowing{Token: client.Connectors}, nil },
@@ -74,13 +74,13 @@ func adminCall(gw caller, defaultSum [sha256.Size]byte, tokens tokenLookup) func
 			},
 		})
 
-		wire, err := wireResult(res)
+		wire, err := wireResult(reply.Result)
 
 		if err != nil {
 			return admin.CallOutcome{}, err
 		}
 
-		out := admin.CallOutcome{Result: wire}
+		out := admin.CallOutcome{Result: wire, Approval: reply.Approval}
 
 		if connector, tool, ok := strings.Cut(req.Name, "."); ok && connector != "" && tool != "" {
 			if class, ok := gw.Class(ctx, connector, tool); ok {

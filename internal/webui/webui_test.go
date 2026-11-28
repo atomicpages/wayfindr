@@ -55,6 +55,46 @@ type fakeAdmin struct {
 	callAnswers []string
 	callErr     error
 	callReqs    []admin.CallRequest
+	// approvals are the queue's entries; approvalsErr makes Approvals fail,
+	// answerErr the answers; answered records each, as "approve id" or
+	// "deny id", then " created <RFC 3339>" when it named a created time;
+	// listings counts the calls to Approvals.
+	approvals    []admin.ApprovalRow
+	approvalsErr error
+	answerErr    error
+	answered     []string
+	listings     int
+}
+
+func (f *fakeAdmin) Approvals(context.Context) (admin.ApprovalList, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.listings++
+
+	return admin.ApprovalList{Approvals: f.approvals}, f.approvalsErr
+}
+
+func (f *fakeAdmin) ApproveApproval(_ context.Context, id string, created time.Time) error {
+	return f.answer("approve", id, created)
+}
+
+func (f *fakeAdmin) DenyApproval(_ context.Context, id string, created time.Time) error {
+	return f.answer("deny", id, created)
+}
+
+func (f *fakeAdmin) answer(verb, id string, created time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	answer := verb + " " + id
+
+	if !created.IsZero() {
+		answer += " created " + created.UTC().Format(time.RFC3339Nano)
+	}
+
+	f.answered = append(f.answered, answer)
+
+	return f.answerErr
 }
 
 func (f *fakeAdmin) PublicURL(context.Context) (admin.PublicURL, error) {

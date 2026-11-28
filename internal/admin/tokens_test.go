@@ -35,14 +35,17 @@ type fakeTokens struct {
 	grants  []store.OAuthGrant
 	creates [][]string
 	remotes []bool
-	err     error
+	// approvals is the approval argument of each Create call.
+	approvals [][]string
+	err       error
 }
 
-func (f *fakeTokens) Create(_ context.Context, name string, connectors []string, remote bool) (store.ClientToken, string, error) {
+func (f *fakeTokens) Create(_ context.Context, name string, connectors []string, remote bool, approval []string) (store.ClientToken, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.creates = append(f.creates, append([]string{name}, connectors...))
 	f.remotes = append(f.remotes, remote)
+	f.approvals = append(f.approvals, approval)
 
 	if f.err != nil {
 		return store.ClientToken{}, "", f.err
@@ -52,7 +55,7 @@ func (f *fakeTokens) Create(_ context.Context, name string, connectors []string,
 		return store.ClientToken{}, "", fmt.Errorf("create client token %s: %w", name, store.ErrExists)
 	}
 
-	t := store.ClientToken{Name: name, Connectors: connectors, Remote: remote, CreatedAt: created}
+	t := store.ClientToken{Name: name, Connectors: connectors, Remote: remote, Approval: approval, CreatedAt: created}
 	f.tokens = append(f.tokens, t)
 
 	return t, testTokenValue, nil
@@ -103,6 +106,14 @@ func (f *fakeTokens) createRemotes() []bool {
 	defer f.mu.Unlock()
 
 	return slices.Clone(f.remotes)
+}
+
+// createApprovals is the approval argument of each Create call.
+func (f *fakeTokens) createApprovals() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return slices.Clone(f.approvals)
 }
 
 func (f *fakeTokens) createCalls() [][]string {
@@ -228,6 +239,18 @@ func TestCreateTokenRefusals(t *testing.T) {
 		{"unknown connector", `{"name":"nightly","connectors":["github","gmail"]}`, 400,
 			`no connector is called "gmail"; configured: github, linear, slack`, false},
 		{"name taken", `{"name":"taken","connectors":["github"]}`, 409, `a client token or OAuth grant called "taken" already exists`, true},
+		// Approval gates (ADR 0024): the admin API refuses them itself, not
+		// only the CLI.
+		{"approval without remote", `{"name":"nightly","connectors":["github"],"approval":["@write"]}`, 400,
+			"Approval gates protect only remote clients: a local agent can approve its own calls with the default token.", false},
+		{"approval remote false", `{"name":"nightly","connectors":["github"],"remote":false,"approval":["github.create_*"]}`, 400,
+			"Approval gates protect only remote clients", false},
+		{"approval entry malformed", `{"name":"grok","connectors":["github"],"remote":true,"approval":["@write","@read"]}`, 400,
+			`invalid approval rule: approval[1]: "@read": reads cannot be gated`, false},
+		{"approval names a foreign connector", `{"name":"grok","connectors":["github","linear"],"remote":true,"approval":["@write","slack.post_*"]}`, 400,
+			`an approval entry names connector "slack", which this client token can't use; its connectors: github, linear`, false},
+		{"approval exempts a foreign connector", `{"name":"grok","connectors":["github"],"remote":true,"approval":["@write","!linear.list_*"]}`, 400,
+			`names connector "linear"`, false},
 	}
 
 	for _, tt := range tests {
@@ -244,6 +267,61 @@ func TestCreateTokenRefusals(t *testing.T) {
 				t.Errorf("Create called = %v, want %v", got, tt.wantCreate)
 			}
 		})
+	}
+}
+
+// TestCreateTokenApprovalIsAnsweredPassedAndListed: a remote token's
+// approval entries reach Create as given, and the create's answer and the
+// list show them; a token without any shows no approval key.
+func TestCreateTokenApprovalIsAnsweredPassedAndListed(t *testing.T) {
+	f := &fakeTokens{}
+	c, srv := serveTokens(t, f)
+	entries := []string{"@write", "github.delete_*", "!github.delete_draft"}
+
+	got, err := c.CreateToken(t.Context(), admin.TokenSpec{Name: "grok", Connectors: []string{"github", "linear"}, Remote: true, Approval: entries})
+
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	want := admin.TokenCreated{
+		Name: "grok", Connectors: []string{"github", "linear"}, Remote: true, Approval: entries,
+		Token: testTokenValue, CreatedAt: created,
+	}
+
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("CreateToken (-want +got):\n%s", diff)
+	}
+
+	if diff := cmp.Diff([][]string{entries}, f.createApprovals()); diff != "" {
+		t.Errorf("Create approval (-want +got):\n%s", diff)
+	}
+
+	// An empty list is no entries: allowed without remote, and not shown.
+	code, body := post(t, srv, srv.URL+"/admin/tokens", `{"name":"local","connectors":["linear"],"approval":[]}`)
+
+	if code != http.StatusOK || strings.Contains(string(body), "approval") {
+		t.Errorf("POST with empty approval = %d %s, want 200 without an approval key", code, body)
+	}
+
+	if diff := cmp.Diff([][]string{entries, nil}, f.createApprovals()); diff != "" {
+		t.Errorf("Create approval, empty passed as nil (-want +got):\n%s", diff)
+	}
+
+	code, body = get(t, srv, srv.URL+"/admin/tokens")
+
+	if code != http.StatusOK {
+		t.Fatalf("GET /admin/tokens = %d, want 200; body: %s", code, body)
+	}
+
+	wantList := `{"tokens":[` +
+		`{"name":"grok","kind":"token","connectors":["github","linear"],"remote":true,` +
+		`"approval":["@write","github.delete_*","!github.delete_draft"],"created_at":"2026-11-08T10:00:00Z"},` +
+		`{"name":"local","kind":"token","connectors":["linear"],"remote":false,"created_at":"2026-11-08T10:00:00Z"}` +
+		`]}` + "\n"
+
+	if diff := cmp.Diff(wantList, string(body)); diff != "" {
+		t.Errorf("list body (-want +got):\n%s", diff)
 	}
 }
 

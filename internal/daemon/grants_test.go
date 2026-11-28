@@ -202,7 +202,7 @@ func TestCreateGrantRefusesNamesAClientTokenCouldNotHave(t *testing.T) {
 func TestGrantsAndClientTokensShareOneNameSpace(t *testing.T) {
 	h := newGrantHost(t)
 
-	if _, _, err := h.tokens.Create(t.Context(), "ci", []string{"github"}, false); err != nil {
+	if _, _, err := h.tokens.Create(t.Context(), "ci", []string{"github"}, false, nil); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -217,7 +217,7 @@ func TestGrantsAndClientTokensShareOneNameSpace(t *testing.T) {
 
 	h.grant("chatgpt")
 
-	if _, _, err := h.tokens.Create(t.Context(), "chatgpt", []string{"github"}, false); !errors.Is(err, store.ErrExists) {
+	if _, _, err := h.tokens.Create(t.Context(), "chatgpt", []string{"github"}, false, nil); !errors.Is(err, store.ErrExists) {
 		t.Errorf("Create of a grant's name = %v, want ErrExists", err)
 	}
 
@@ -259,6 +259,28 @@ func TestIssuedGrantTokenResolvesAsARemoteScopedClient(t *testing.T) {
 
 	if h.accepts(p.access.Digest) {
 		t.Error("the access token is accepted at its expiry")
+	}
+}
+
+// A grant's approval entries (ADR 0024) reach the client its access token
+// resolves to, which the gateway's gate reads.
+func TestIssuedGrantTokenCarriesTheGrantsApprovalEntries(t *testing.T) {
+	h := newGrantHost(t)
+	created := h.clock.Now()
+	entries := []string{"@destructive", "github.delete_*", "!github.delete_draft"}
+
+	if err := h.tokens.CreateGrant(t.Context(), store.OAuthGrant{
+		Name: "chatgpt", ClientID: testClientID, Resource: oauthserver.Resource(grantIssuer),
+		Connectors: []string{"github"}, Approval: entries, CreatedAt: created,
+	}); err != nil {
+		t.Fatalf("CreateGrant: %v", err)
+	}
+
+	got, ok := h.tokens.registry.Lookup(h.issue("chatgpt", created).access.Digest)
+	want := clienttoken.Client{Name: "chatgpt", Connectors: []string{"github"}, Approval: entries, Remote: true, Created: created}
+
+	if !ok || !cmp.Equal(want, got) {
+		t.Errorf("Lookup of the issued access token = %+v, %v; want %+v", got, ok, want)
 	}
 }
 
@@ -353,7 +375,7 @@ func TestRevokeDeletesEitherKindAndRevokeGrantOnlyGrants(t *testing.T) {
 	h := newGrantHost(t)
 	p := h.issue("chatgpt", h.grant("chatgpt"))
 
-	_, value, err := h.tokens.Create(t.Context(), "ci", []string{"github"}, false)
+	_, value, err := h.tokens.Create(t.Context(), "ci", []string{"github"}, false, nil)
 
 	if err != nil {
 		t.Fatal(err)
@@ -493,7 +515,7 @@ func TestARecreatedNameIsAnotherInstance(t *testing.T) {
 	}
 
 	t.Run("client token", func(t *testing.T) {
-		_, value, err := h.tokens.Create(t.Context(), "nightly", []string{"github"}, false)
+		_, value, err := h.tokens.Create(t.Context(), "nightly", []string{"github"}, false, nil)
 
 		if err != nil {
 			t.Fatal(err)
@@ -515,7 +537,7 @@ func TestARecreatedNameIsAnotherInstance(t *testing.T) {
 		}
 
 		h.clock.advance(time.Second)
-		_, value, err = h.tokens.Create(t.Context(), "nightly", []string{"github"}, false)
+		_, value, err = h.tokens.Create(t.Context(), "nightly", []string{"github"}, false, nil)
 
 		if err != nil {
 			t.Fatal(err)

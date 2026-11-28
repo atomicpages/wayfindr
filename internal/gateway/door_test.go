@@ -65,7 +65,7 @@ func TestCallRefusesWhatCallToolRefuses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec.take()
-			res := e.gateway.Call(t.Context(), gateway.CallRequest{Name: tt.tool}, optsFor(tt.client))
+			res := e.gateway.Call(t.Context(), gateway.CallRequest{Name: tt.tool}, optsFor(tt.client)).Result
 
 			if got := text(t, res); res.IsError != (tt.text != "") || !strings.Contains(got, tt.text) {
 				t.Errorf("result (isError %v) %q, want an error containing %q (or success for \"\")", res.IsError, got, tt.text)
