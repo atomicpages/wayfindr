@@ -145,6 +145,7 @@ func TestConnectorToolsDescribesOneTool(t *testing.T) {
 		{Name: "save_issue", Class: "write", Exposed: true, Definition: saveIssue},
 		{Name: "create_issue", Class: "write", Definition: createIssue, RequiredArgs: 2},
 		{Name: "ping", Class: "read", Exposed: true, Definition: json.RawMessage(`{"name":"ping","inputSchema":{"type":"object"}}`)},
+		{Name: "bare", Class: "read", Exposed: true, Definition: json.RawMessage(`{"name":"bare"}`)},
 	}}
 	host := toolsDaemon(t, list)
 
@@ -191,19 +192,32 @@ No argument is required by the schema; its descriptions may still say what a cal
 		})
 	}
 
-	t.Run("--json", func(t *testing.T) {
-		var stdout, stderr bytes.Buffer
+	for _, tt := range []struct{ tool, want string }{
+		{"create_issue", `{"type":"object","properties":{"team":{"type":"string"},"title":{"type":"string","description":"Issue title"},"meta":{}},"required":["team","title"]}`},
+		{"bare", `{}`},
+	} {
+		t.Run(tt.tool+" --json is the inputSchema", func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
 
-		if code := RunWith([]string{"connector", "tools", "gmail", "save_issue", "--json"}, &stdout, &stderr, host); code != 0 {
-			t.Fatalf("exit code = %d, want 0; stderr: %s", code, stderr.String())
-		}
+			if code := RunWith([]string{"connector", "tools", "gmail", tt.tool, "--json"}, &stdout, &stderr, host); code != 0 {
+				t.Fatalf("exit code = %d, want 0; stderr: %s", code, stderr.String())
+			}
 
-		var got admin.ToolEntry
+			var got, want any
 
-		if err := json.Unmarshal(stdout.Bytes(), &got); err != nil || got.Name != "save_issue" || !json.Valid(got.Definition) {
-			t.Errorf("--json = %s (%v), want the save_issue entry", stdout.String(), err)
-		}
-	})
+			if err := json.Unmarshal([]byte(tt.want), &want); err != nil {
+				t.Fatalf("the test's want is not JSON: %v", err)
+			}
+
+			if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+				t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
+			}
+
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("--json (-want +got):\n%s", diff)
+			}
+		})
+	}
 
 	t.Run("unknown tool", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer

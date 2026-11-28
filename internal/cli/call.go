@@ -32,7 +32,7 @@ const (
 // callFlags are `wayfindr call`'s flags.
 type callFlags struct {
 	args, argsFile, tokenFile, output string
-	scaffold, yes                     bool
+	yes                               bool
 }
 
 func newCallCmd(host Host) *cobra.Command {
@@ -47,9 +47,8 @@ client token with --token-file. Use it to prove a sign-in works, or to see what
 a token's agent sees.
 
 Arguments are a JSON object, from --args or --args-file (- reads stdin); none
-means {}. --scaffold prints a starting object for the tool's required
-arguments, and nothing else, to edit and pass back with --args-file;
-` + "`wayfindr connector tools <connector> <tool>`" + ` describes every argument.
+means {}. ` + "`wayfindr connector tools <connector> <tool>`" + ` shows what the tool
+takes, and with --json prints its inputSchema.
 
 A read tool runs at once. A write or destructive tool asks first; --yes skips
 the question, and off a terminal the command fails without it. When the
@@ -60,7 +59,6 @@ to answer.
 The output is the result's text, cut at 4 KiB; --output writes the whole
 result as JSON, and --json prints the daemon's full response.`,
 		Example: `  wayfindr connector tools linear create_issue
-  wayfindr call linear.create_issue --scaffold > args.json
   wayfindr call linear.create_issue --args-file args.json
   wayfindr call linear.search_issues --args '{"query":"login bug"}'
   wayfindr call github.list_repos --token-file ./nightly.token`,
@@ -71,7 +69,6 @@ result as JSON, and --json prints the daemon's full response.`,
 	}
 	cmd.Flags().StringVar(&f.args, "args", "", "the tool's arguments as a JSON object")
 	cmd.Flags().StringVar(&f.argsFile, "args-file", "", "read the arguments from a file (- reads stdin)")
-	cmd.Flags().BoolVar(&f.scaffold, "scaffold", false, "print a JSON object of the required arguments, then exit (connector tools <connector> <tool> describes them all)")
 	cmd.Flags().StringVar(&f.tokenFile, "token-file", "", "run as the client token in this file (- reads stdin)")
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "run a write or destructive tool without asking")
 	cmd.Flags().StringVar(&f.output, "output", "", "write the whole result as JSON to this file")
@@ -104,14 +101,6 @@ func runCall(cmd *cobra.Command, host Host, name string, f callFlags) error {
 
 	if err != nil {
 		return err
-	}
-
-	if f.scaffold {
-		if listErr != nil {
-			return d.explain(listErr)
-		}
-
-		return writeScaffold(cmd.OutOrStdout(), entry.Definition)
 	}
 
 	stdin := cmd.InOrStdin()
@@ -192,7 +181,7 @@ func runCall(cmd *cobra.Command, host Host, name string, f callFlags) error {
 }
 
 // listedTool is connector's tool as the daemon lists it: its class, for the
-// question, and its schema, for the scaffold. The owner's listing shows
+// question. The owner's listing shows
 // hidden tools too. It is bounded as `connector tools` is; the call itself
 // is bounded by the connector's timeout in the daemon.
 //
@@ -253,7 +242,7 @@ func readArguments(stdin io.Reader, f callFlags) (json.RawMessage, error) {
 	raw = bytes.TrimSpace(raw)
 
 	if !json.Valid(raw) || len(raw) == 0 || raw[0] != '{' {
-		return nil, fmt.Errorf("the arguments in %s are not a JSON object; --scaffold prints one to start from", from)
+		return nil, fmt.Errorf("the arguments in %s are not a JSON object; `wayfindr connector tools <connector> <tool>` shows what it takes", from)
 	}
 
 	return raw, nil

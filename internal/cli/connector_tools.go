@@ -38,8 +38,8 @@ guarantees, so name the writes you allow rather than trusting @write.
 
 With a tool, it describes that tool's arguments instead: each one's name,
 type, whether the schema requires it, and its description, wrapped to the
-terminal (one line per argument when piped). ` + "`wayfindr call <connector.tool> --scaffold`" + `
-prints a JSON object of the required ones to start from.`,
+terminal (one line per argument when piped). With --json it prints the tool's
+inputSchema, re-encoded on the way, so its key order may differ.`,
 		Example: `  wayfindr connector tools linear
   wayfindr connector tools linear save_issue`,
 		Args: cobra.RangeArgs(1, 2),
@@ -121,7 +121,7 @@ func writeToolsTable(w io.Writer, list admin.ToolList) error {
 // naming it and its class, a note when its schema requires nothing (a tool
 // that both creates and updates often says what a create needs only in its
 // descriptions), and argTable, wrapped to stdout's width on a terminal.
-// With --json it prints the tool's entry, definition included.
+// With --json it prints the tool's inputSchema (writeInputSchema).
 func writeToolArgs(cmd *cobra.Command, list admin.ToolList, name string) error {
 	i := slices.IndexFunc(list.Tools, func(t admin.ToolEntry) bool { return t.Name == name })
 
@@ -134,7 +134,7 @@ func writeToolArgs(cmd *cobra.Command, list admin.ToolList, name string) error {
 	out := cmd.OutOrStdout()
 
 	if wantJSON(cmd) {
-		return writeJSON(out, t)
+		return writeInputSchema(out, t.Definition)
 	}
 
 	fields, err := inputFields(t.Definition)
@@ -186,4 +186,56 @@ func termWidth(w io.Writer) int {
 	}
 
 	return width
+}
+
+// inputSchema is a tool definition's inputSchema, or {} when it has none.
+func inputSchema(definition json.RawMessage) (json.RawMessage, error) {
+	var d struct {
+		InputSchema json.RawMessage `json:"inputSchema"`
+	}
+
+	if err := json.Unmarshal(definition, &d); err != nil {
+		return nil, fmt.Errorf("read the tool's definition: %w", err)
+	}
+
+	if s := bytes.TrimSpace(d.InputSchema); len(s) == 0 || string(s) == "null" {
+		return json.RawMessage("{}"), nil
+	}
+
+	return d.InputSchema, nil
+}
+
+// inputFields are the fields of a tool definition's inputSchema.
+func inputFields(definition json.RawMessage) ([]admin.SchemaField, error) {
+	schema, err := inputSchema(definition)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return admin.SchemaFields(schema)
+}
+
+// writeInputSchema prints a tool definition's inputSchema, indented, or {}
+// when it has none. The definition the daemon lists was re-encoded on the
+// way, so key order and string escapes may differ from what the upstream
+// sent.
+func writeInputSchema(w io.Writer, definition json.RawMessage) error {
+	schema, err := inputSchema(definition)
+
+	if err != nil {
+		return err
+	}
+
+	var b bytes.Buffer
+
+	if err := json.Indent(&b, schema, "", "  "); err != nil {
+		return fmt.Errorf("read the tool's inputSchema: %w", err)
+	}
+
+	b.WriteByte('\n')
+
+	_, err = w.Write(b.Bytes())
+
+	return err
 }

@@ -86,70 +86,6 @@ func newCallDaemon(t *testing.T, answers ...string) (Host, *callDaemon) {
 
 const okResult = `{"content":[{"type":"text","text":"Issue ENG-481 created."},{"type":"image","data":"AAECAw==","mimeType":"image/png"}]}`
 
-// TestCallScaffoldPrintsOnlyJSON: --scaffold's stdout is the JSON object of
-// the required arguments and nothing else, and stderr stays empty, so the
-// two never interleave on a terminal.
-func TestCallScaffoldPrintsOnlyJSON(t *testing.T) {
-	host, d := newCallDaemon(t, okResult)
-	stdout, stderr, code := run(t, host, "call", "linear.create_issue", "--scaffold")
-
-	if code != 0 {
-		t.Fatalf("exit code = %d; stderr: %s", code, stderr)
-	}
-
-	if want := "{\"team\": \"\", \"title\": \"\"}\n"; stdout != want {
-		t.Errorf("stdout = %q, want %q", stdout, want)
-	}
-
-	if stderr != "" {
-		t.Errorf("stderr = %q, want nothing", stderr)
-	}
-
-	if len(d.got()) != 0 {
-		t.Errorf("--scaffold called the tool: %+v", d.got())
-	}
-}
-
-// TestScaffoldOverSchemaShapes: the scaffold's decision table, a pure
-// function of the schema (each type's zero value, the first enum value,
-// only required properties, in the schema's order).
-func TestScaffoldOverSchemaShapes(t *testing.T) {
-	tests := []struct {
-		name, schema, want string
-	}{
-		{"none", ``, `{}`},
-		{"no properties", `{"type":"object"}`, `{}`},
-		{"flat types", `{"properties":{"s":{"type":"string"},"n":{"type":"number"},"i":{"type":"integer"},"b":{"type":"boolean"}},` +
-			`"required":["s","n","i","b"]}`, `{"s": "", "n": 0, "i": 0, "b": false}`},
-		{"nested", `{"properties":{"a":{"type":"array"},"o":{"type":"object","properties":{"x":{"type":"string"}}}},"required":["o","a"]}`,
-			`{"a": [], "o": {}}`},
-		{"enum", `{"properties":{"p":{"type":"string","enum":["low","high"]}},"required":["p"]}`, `{"p": "low"}`},
-		{"optional left out", `{"properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["b"]}`, `{"b": ""}`},
-		{"nullable type", `{"properties":{"a":{"type":["null","integer"]}},"required":["a"]}`, `{"a": 0}`},
-		{"no type", `{"properties":{"a":{}},"required":["a"]}`, `{"a": null}`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fields, err := admin.SchemaFields(json.RawMessage(tt.schema))
-
-			if err != nil {
-				t.Fatalf("schemaFields: %v", err)
-			}
-
-			got := scaffold(fields)
-
-			if got != tt.want {
-				t.Errorf("scaffold = %s, want %s", got, tt.want)
-			}
-
-			if !json.Valid([]byte(got)) {
-				t.Errorf("scaffold %s is not JSON", got)
-			}
-		})
-	}
-}
-
 func TestCallRunsAReadToolAtOnceAndPrintsThePreview(t *testing.T) {
 	host, d := newCallDaemon(t, okResult)
 	stdout, stderr, code := run(t, host, "call", "linear.search_issues", "--args", `{"query":"login"}`)
@@ -409,15 +345,6 @@ func TestCallStillCallsWhenTheListingFails(t *testing.T) {
 
 		if code != 1 || len(d.got()) != 1 || !strings.Contains(stdout, "needs you to sign in again") {
 			t.Errorf("exit %d, %d calls, stdout %q; want the call made and the gateway's error", code, len(d.got()), stdout)
-		}
-	})
-
-	t.Run("--scaffold needs the listing", func(t *testing.T) {
-		host, d := newCallDaemon(t, refused)
-		d.toolsErr = notReady
-
-		if _, stderr, code := run(t, host, "call", "linear.search_issues", "--scaffold"); code == 0 || !strings.Contains(stderr, "linear is not ready.") {
-			t.Errorf("exit %d, stderr %q; want the listing's error", code, stderr)
 		}
 	})
 }

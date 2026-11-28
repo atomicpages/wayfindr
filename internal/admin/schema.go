@@ -144,7 +144,7 @@ func (t typed) types() []string {
 	return ts
 }
 
-// one is t's one type, for a form field or a scaffold value: type's first
+// one is t's one type, for a form field: type's first
 // non-null entry, as a list of types has always meant here; else the one
 // distinct non-null type of its anyOf and oneOf members; "" for none or
 // several.

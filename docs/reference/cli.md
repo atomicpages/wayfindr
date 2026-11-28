@@ -680,15 +680,15 @@ to prove a sign-in works, or to see what a scoped token's agent sees. See
 ```sh
 wayfindr connector tools linear                     # pick a tool
 wayfindr connector tools linear create_issue        # read its arguments
-wayfindr call linear.create_issue --scaffold > args.json
-wayfindr call linear.create_issue --args-file args.json
+wayfindr call linear.create_issue --args '{"team":"core","title":"Test"}'
+wayfindr call linear.create_issue --args-file args.json --yes
+jq '{team, title}' issue.json | wayfindr call linear.create_issue --args-file - --yes
 ```
 
 | Flag                  | Default | Description                                                                                                         |
 | --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
 | `--args <json>`       | `{}`    | The tool's arguments, a JSON object.                                                                                |
 | `--args-file <path>`  | none    | Read the arguments from a file. `-` reads stdin. Not with `--args`.                                                 |
-| `--scaffold`          | `false` | Print a JSON object of the tool's required arguments, and nothing else, then exit.                                   |
 | `--token-file <path>` | none    | Run the call as the client token in this file, narrowed to its connectors. `-` reads stdin.                         |
 | `--yes`               | `false` | Run a `write` or `destructive` tool without asking.                                                                 |
 | `--output <file>`     | none    | Also write the whole result, as MCP's JSON, to this file.                                                           |
@@ -700,18 +700,31 @@ argument, where `ps` and your shell history would see it; the daemon neither
 stores nor logs it. A token the daemon doesn't accept fails with
 `The daemon accepts no client token with that value: it may be mistyped, revoked, or expired.`
 
-**`--scaffold`** prints every required argument with its type's zero value
-(`""`, `0`, `false`, `[]`, `{}`, or an enum's first value), in the order the
-schema lists them, and nothing else, so it can be saved and passed back with
-`--args-file`. A schema that requires nothing prints `{}`.
-[`connector tools <connector> <tool>`](#wayfindr-connector-tools) describes
-every argument.
+To see what a tool takes, run
+[`connector tools <connector> <tool>`](#wayfindr-connector-tools): a table of
+its arguments, or with `--json` its `inputSchema`.
 
-```
-{"team": "", "title": ""}
+**Arguments** are one JSON object, given one of three ways (none means `{}`):
+
+```sh
+# inline
+wayfindr call linear.search_issues --args '{"query":"login bug"}'
+
+# from a file
+wayfindr call linear.search_issues --args-file args.json
+
+# piped in: --args-file - reads stdin
+cat args.json | wayfindr call linear.search_issues --args-file -
+wayfindr call linear.search_issues --args-file - < args.json
+jq '{query: .title}' issue.json | wayfindr call linear.search_issues --args-file -
 ```
 
-Edit the JSON and pass it back with `--args-file`.
+The arguments may be up to 4 MiB, and must be a JSON object, or the command
+fails before calling. When stdin holds the arguments it can't also answer a
+question, so a `write` or `destructive` tool needs `--yes`, and a tool that asks
+for input mid-call fails with
+`the tool asks for input, but stdin held the arguments or the token`; use a file
+for either. `--args-file -` and `--token-file -` can't both read stdin.
 
 **Before the call.** A `read` tool runs at once. A `write` or `destructive` tool
 asks `linear.create_issue is a write tool. Run it? [y/N]`; a no prints
@@ -726,7 +739,6 @@ call still goes out, so you see the server's own error and the call is in the
 call log. The command prints `linear's tools could not be listed: <reason>`, and
 since the tool's class is unknown it asks as for a destructive tool:
 `The class of linear.create_issue is unknown, so it may change or delete data. Run it? [y/N]`.
-`--scaffold` needs the listing, and fails with its reason.
 
 **Prints** a status line, then the result's content:
 
@@ -1499,7 +1511,10 @@ first line instead of a table.
 
 A tool whose schema requires nothing, such as one that both creates and
 updates, may still say what a create needs in its descriptions, as `team` does
-above. With `--json` it prints that tool's entry, as in the list.
+above. With `--json` it prints the tool's `inputSchema`, indented (`{}` when the
+tool has none), to read or to write `--args` against. It is the JSON Schema the
+upstream sent, with its own camelCase keys, re-encoded on the way, so the keys
+may come in a different order.
 
 **Exit:** `0` with the list. `1` when the daemon isn't running, there is no such
 connector or tool, or the connector isn't ready; the message says what to do.

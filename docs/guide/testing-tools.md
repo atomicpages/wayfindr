@@ -55,18 +55,20 @@ linear.create_issue (write)
   labels  string[]            Label names.
 ```
 
-Then ask for a starting point. `--scaffold` prints the required arguments as
-JSON, and nothing else:
+Add `--json` for the tool's `inputSchema`, the JSON Schema the table is read
+from, when you want every detail.
+
+Pass the arguments as a JSON object: inline, from a file, or piped in with
+`--args-file -`:
 
 ```sh
-wayfindr call linear.create_issue --scaffold > args.json
-```
-
-Fill in `args.json`, then pass it back:
-
-```sh
+wayfindr call linear.create_issue --args '{"team":"core","title":"Test"}'
 wayfindr call linear.create_issue --args-file args.json
+cat args.json | wayfindr call linear.create_issue --args-file - --yes
 ```
+
+Piped arguments use up stdin, so the "Run it?" question can't be asked there:
+add `--yes` for a write tool.
 
 ```text
 linear.create_issue is a write tool. Run it? [y/N] y
